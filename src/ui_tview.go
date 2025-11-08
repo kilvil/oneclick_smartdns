@@ -57,6 +57,8 @@ type tvState struct {
     activeGroup string
 
     assigned map[string]Assignment // sub -> assignment parsed from config
+
+    dirty bool // 有未保存更改
 }
 
 func sortedKeys(m map[string][]string) []string {
@@ -101,9 +103,13 @@ func (s *tvState) setHeader() { s.header.SetDynamicColors(true).SetText(s.header
 func (s *tvState) setFooter() {
     s.footer.SetDynamicColors(true)
     if s.help {
-        s.footer.SetText("q 退出 | 空格: 二级勾选/一级全选 | Enter 勾选 | 方向键切换 | g 选择分组 | n 新建分组 | r 刷新分组 | m 切换方式 | e 编辑标识 | s 保存 | z 服务管理 | ? 帮助")
+        s.footer.SetText("q 退出 | 空格: 二级勾选/一级全选 | Enter 勾选 | 方向键切换 | g 返回分组 | n 新建分组 | r 刷新分组 | m 切换方式 | e 编辑标识 | s 保存 | z 服务管理 | ? 帮助")
     } else {
-        s.footer.SetText("? 帮助  |  空格: 二级勾选 / 一级全选  |  g 选择分组  n 创建分组  r 刷新分组  |  m 切换 nameserver/address  |  e 编辑组名/地址  |  s 保存  |  z 服务管理  |  q 退出")
+        txt := "? 帮助  |  空格: 二级勾选 / 一级全选  |  g 返回分组  n 新建分组  r 刷新分组  |  m 切换 nameserver/address  |  e 编辑组名/地址  |  s 保存  |  z 服务管理  |  q 退出"
+        if s.dirty {
+            txt += "  [yellow]有未保存更改[-]，按 s 保存"
+        }
+        s.footer.SetText(txt)
     }
 }
 
@@ -151,7 +157,8 @@ func (s *tvState) topMark(top string) string {
     }
     if sel == 0 { return "[ ]" }
     if sel == free { return "[*]" }
-    return "[-]"
+    // Use [=] for partial to avoid tview color reset tag "[-]" being parsed.
+    return "[=]"
 }
 
 func (s *tvState) populateLeft() {
@@ -182,18 +189,24 @@ func (s *tvState) populateRight() {
         sub := sub
         key := s.curTop + "/" + sub
         mark := "[ ]"
+        sec := ""
         if s.selected[key] {
             mark = "[*]"
         } else if s.isOccupiedByOtherGroup(sub) {
             mark = "!"
+            if a, ok := s.assigned[sub]; ok {
+                sec = fmt.Sprintf("被分组 %s 占用", a.Ident)
+            }
         }
-        s.right.AddItem(fmt.Sprintf("%s %s", mark, sub), "", 0, func() {
+        s.right.AddItem(fmt.Sprintf("%s %s", mark, sub), sec, 0, func() {
             if s.isOccupiedByOtherGroup(sub) {
                 return
             }
             s.selected[key] = !s.selected[key]
             s.populateRight()
             s.populateLeft()
+            s.dirty = true
+            s.setFooter()
         })
     }
     if len(subs) > 0 {
@@ -226,27 +239,9 @@ func (s *tvState) showEditIdent() {
 }
 
 func (s *tvState) saveSelection() {
-    if s.method != "nameserver" && s.method != "address" { s.toast("请选择正确的添加方式 (m)"); return }
-    if strings.TrimSpace(s.ident) == "" {
-        if s.method == "nameserver" && s.activeGroup != "" { s.ident = s.activeGroup; s.setHeader() } else { s.toast("请设置组名或IP (e)"); return }
-    }
-    count := 0
-    for key, on := range s.selected {
-        if !on { continue }
-        parts := strings.SplitN(key, "/", 2)
-        if len(parts) != 2 { continue }
-        top := parts[0]; sub := parts[1]
-        domains := s.cfg[top][sub]
-        if len(domains) == 0 { continue }
-        _ = deletePlatformRules(sub)
-        _ = addDomainRules(s.method, domains, s.ident, sub)
-        count++
-    }
+    count, err := s.saveSelectionSilent()
+    if err != nil { s.toast(err.Error()); return }
     if count == 0 { s.toast("未选择任何平台，无需保存"); return }
-    // refresh assignments and UI selection state after write
-    s.refreshAssignments()
-    s.resetSelectionForActiveGroup()
-    s.populateRight()
     if s.sdActive {
         m := tview.NewModal().SetText(fmt.Sprintf("保存成功，已写入 %d 个平台\n是否重启 SmartDNS 应用新配置？", count)).
             AddButtons([]string{"重启", "稍后"}).SetDoneFunc(func(i int, l string) {
@@ -255,6 +250,44 @@ func (s *tvState) saveSelection() {
             })
         s.pages.AddPage("modal", center(50, 7, m), true, true)
     } else { s.toast("保存完成 (SmartDNS 未运行)") }
+}
+
+// saveSelectionSilent writes current selection without any modal prompts.
+// It validates method and ident, applies rules, refreshes state, clears dirty.
+// Returns number of platforms written, or error for invalid state.
+func (s *tvState) saveSelectionSilent() (int, error) {
+    if s.method != "nameserver" && s.method != "address" {
+        return 0, fmt.Errorf("请选择正确的添加方式 (m)")
+    }
+    if strings.TrimSpace(s.ident) == "" {
+        if s.method == "nameserver" && s.activeGroup != "" {
+            s.ident = s.activeGroup
+            s.setHeader()
+        } else {
+            return 0, fmt.Errorf("请设置组名或IP (e)")
+        }
+    }
+    count := 0
+    for key, on := range s.selected {
+        if !on { continue }
+        parts := strings.SplitN(key, "/", 2)
+        if len(parts) != 2 { continue }
+        top := parts[0]
+        sub := parts[1]
+        domains := s.cfg[top][sub]
+        if len(domains) == 0 { continue }
+        _ = deletePlatformRules(sub)
+        _ = addDomainRules(s.method, domains, s.ident, sub)
+        count++
+    }
+    if count > 0 {
+        s.refreshAssignments()
+        s.resetSelectionForActiveGroup()
+        s.populateRight()
+        s.dirty = false
+        s.setFooter()
+    }
+    return count, nil
 }
 
 func (s *tvState) toast(msg string) {
@@ -277,7 +310,7 @@ func runTUI() {
         header:   tview.NewTextView().SetDynamicColors(true),
         footer:   tview.NewTextView().SetDynamicColors(true),
         left:     tview.NewList().ShowSecondaryText(false),
-        right:    tview.NewList().ShowSecondaryText(false),
+        right:    tview.NewList().ShowSecondaryText(true),
         pages:    tview.NewPages(),
         method:   "nameserver",
         ident:    "",
@@ -331,6 +364,8 @@ func runTUI() {
                 if all { for _, sub := range free { st.selected[top+"/"+sub] = false } } else { for _, sub := range free { st.selected[top+"/"+sub] = true } }
                 if st.curTop == top { st.populateRight() }
                 st.populateLeft()
+                st.dirty = true
+                st.setFooter()
             }
             return nil
         case 'l':
@@ -364,6 +399,8 @@ func runTUI() {
                         st.selected[key] = !st.selected[key]
                         st.populateRight()
                         st.populateLeft()
+                        st.dirty = true
+                        st.setFooter()
                     }
                 }
                 return nil
@@ -378,6 +415,8 @@ func runTUI() {
                     st.selected[key] = !st.selected[key]
                     st.populateRight()
                     st.populateLeft()
+                    st.dirty = true
+                    st.setFooter()
                 }
             }
             return nil
@@ -414,7 +453,33 @@ func runTUI() {
             case 'm': if st.method == "nameserver" { st.method = "address" } else { st.method = "nameserver" }; st.setHeader(); return nil
             case 'e': st.showEditIdent(); return nil
             case 's': st.saveSelection(); return nil
-            case 'g': st.openGroupsPage(); return nil
+            case 'g':
+                if st.dirty {
+                    m := tview.NewModal().
+                        SetText("当前分组有未保存更改。\n是否保存并返回分组列表？").
+                        AddButtons([]string{"保存并返回", "丢弃并返回", "取消"}).
+                        SetDoneFunc(func(i int, l string) {
+                            st.pages.RemovePage("modal-leave")
+                            switch i {
+                            case 0: // 保存并返回
+                                if n, err := st.saveSelectionSilent(); err != nil {
+                                    st.toast(err.Error())
+                                } else {
+                                    if n == 0 { st.toast("未选择任何平台，无需保存") }
+                                    st.openGroupsPage()
+                                }
+                            case 1: // 丢弃并返回
+                                st.dirty = false
+                                st.setFooter()
+                                st.openGroupsPage()
+                            default: // 取消
+                            }
+                        })
+                    st.pages.AddPage("modal-leave", center(60, 8, m), true, true)
+                } else {
+                    st.openGroupsPage()
+                }
+                return nil
             case 'n': st.showAddGroupModal(nil); return nil
             case 'r': st.reloadGroups(); st.toast("已刷新分组"); return nil
             case 'z': st.openServiceManager(); return nil
@@ -575,7 +640,7 @@ func (s *tvState) openGroupsPage() {
     s.setHeader()
     list := tview.NewList().ShowSecondaryText(false)
     list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, R刷新, Q退出)")
-    s.footer.SetText("Enter 进入配置  |  n 新建分组  r 刷新  |  q 退出  |  g 返回分组列表")
+    s.footer.SetText("Enter 进入配置  |  n 新建分组  r 刷新  |  q 退出  |  进入配置后按 s 保存")
     // refresh groups data
     s.reloadGroups()
     for _, g := range s.groups {
