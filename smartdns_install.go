@@ -1,26 +1,27 @@
 package main
 
 import (
-    "archive/tar"
-    "bufio"
-    "compress/gzip"
-    "context"
-    "errors"
-    "fmt"
-    "io"
-    "io/fs"
-    "net"
-    "net/http"
-    "os"
-    "os/signal"
-    "os/exec"
-    "path/filepath"
-    "regexp"
-    "runtime"
-    "strconv"
-    "strings"
-    "syscall"
-    "time"
+	"archive/tar"
+	"bufio"
+	"compress/gzip"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+    tcell "github.com/gdamore/tcell/v2"
+    "github.com/rivo/tview"
 )
 
 const (
@@ -1255,297 +1256,11 @@ func printBanner() {
 	fmt.Println()
 }
 
-// ===== New Full-Screen TUI (vim-like) =====
-
-type tuiMode int
-
-const (
-    modeTop tuiMode = iota
-    modeSub
-)
-
-type tuiState struct {
-    rows, cols int
-    mode       tuiMode
-    topKeys    []string
-    subMap     map[string][]string // top -> subs
-    cursor     int                 // cursor in current list
-    scroll     int                 // scroll offset
-    curTop     string              // current top for sub mode
-    selected   map[string]bool     // key: top+"/"+sub
-    help       bool
-    method     string // "nameserver" or "address"
-    ident      string // group name or ip
-    sdActive   bool
-}
+// ===== New Full-Screen TUI using tview + tcell =====
 
 func isSmartDNSActive() bool {
     out, _ := runCmdCapture("systemctl", "is-active", "smartdns")
     return strings.TrimSpace(out) == "active"
-}
-
-func getTermSize() (int, int) {
-    out, err := runCmdCapture("stty", "size")
-    if err != nil {
-        return 24, 80
-    }
-    parts := strings.Fields(strings.TrimSpace(out))
-    if len(parts) != 2 {
-        return 24, 80
-    }
-    r, _ := strconv.Atoi(parts[0])
-    c, _ := strconv.Atoi(parts[1])
-    if r <= 0 || c <= 0 {
-        return 24, 80
-    }
-    return r, c
-}
-
-func enableRaw() { _ = runCmdInteractive("stty", "-echo", "raw") }
-func disableRaw() { _ = runCmdInteractive("stty", "sane") }
-
-func clearScreen() { fmt.Print("\x1b[2J\x1b[H") }
-func moveHome()    { fmt.Print("\x1b[H") }
-
-func invertOn()  { fmt.Print("\x1b[7m") }
-func invertOff() { fmt.Print("\x1b[27m") }
-
-func (s *tuiState) visibleArea() int {
-    // Reserve header/footer lines
-    h := s.rows - 8
-    if h < 5 {
-        h = 5
-    }
-    return h
-}
-
-func (s *tuiState) clampCursor(listLen int) {
-    if listLen == 0 {
-        s.cursor, s.scroll = 0, 0
-        return
-    }
-    if s.cursor < 0 {
-        s.cursor = 0
-    }
-    if s.cursor >= listLen {
-        s.cursor = listLen - 1
-    }
-    vis := s.visibleArea()
-    if s.cursor < s.scroll {
-        s.scroll = s.cursor
-    }
-    if s.cursor >= s.scroll+vis {
-        s.scroll = s.cursor - vis + 1
-    }
-    if s.scroll < 0 {
-        s.scroll = 0
-    }
-}
-
-func (s *tuiState) renderHeader() {
-    fmt.Printf("%sSmartDNS 解锁编辑器%s %s(%s)%s\n", BLUE, RESET, CYAN, SCRIPT_VERSION, RESET)
-    status := "未运行"
-    color := RED
-    if s.sdActive {
-        status = "运行中"
-        color = GREEN
-    }
-    fmt.Printf("SmartDNS: %s%s%s  模式: %s  标识: %s\n", color, status, RESET, s.method, s.ident)
-    fmt.Printf("配置: %s  列表: %s\n", SMART_CONFIG_FILE, streamConfigPath())
-}
-
-func padToWidth(s string, w int) string {
-    if len([]rune(s)) >= w {
-        return s
-    }
-    return s + strings.Repeat(" ", w-len([]rune(s)))
-}
-
-func (st *tuiState) renderList(items []string, checkbox bool) {
-    vis := st.visibleArea()
-    start := st.scroll
-    end := start + vis
-    if end > len(items) {
-        end = len(items)
-    }
-    for i := start; i < end; i++ {
-        line := items[i]
-        prefix := "  "
-        if st.mode == modeTop {
-            prefix = " 地区 "
-        }
-        if checkbox {
-            key := st.curTop + "/" + line
-            mark := "[ ]"
-            if st.selected[key] {
-                mark = "[x]"
-            }
-            prefix = mark + " "
-        }
-        content := prefix + line
-        if i == st.cursor {
-            invertOn()
-            fmt.Print(padToWidth(content, st.cols))
-            invertOff()
-        } else {
-            fmt.Print(padToWidth(content, st.cols))
-        }
-        fmt.Print("\n")
-    }
-    // Fill remaining lines to occupy the screen
-    for i := 0; i < vis-(end-start); i++ {
-        fmt.Println(strings.Repeat(" ", st.cols))
-    }
-}
-
-func (s *tuiState) renderFooter() {
-    fmt.Println(strings.Repeat("-", s.cols))
-    if s.help {
-        fmt.Println("键位: ↑/↓/j/k 移动  →/l 进入  ←/h 返回  空格 勾选  m 切换方式  e 编辑标识  s 保存  q 退出")
-    } else {
-        fmt.Println("按 ? 查看帮助  |  m 切换 nameserver/address  |  e 编辑组名/地址  |  s 保存  |  q 退出")
-    }
-    // Pad remaining lines to ensure full-screen render
-    // Approximate used: header(3) + rule(1) + list(visibleArea) + footer(2)
-    used := 3 + 1 + s.visibleArea() + 2
-    for i := 0; i < s.rows-used; i++ {
-        fmt.Println(strings.Repeat(" ", s.cols))
-    }
-}
-
-func (s *tuiState) render(cfg StreamConfig) {
-    clearScreen()
-    moveHome()
-    s.rows, s.cols = getTermSize()
-    s.renderHeader()
-    fmt.Println(strings.Repeat("-", s.cols))
-    switch s.mode {
-    case modeTop:
-        fmt.Println(CYAN + "一级流媒体（右键或 l 进入二级）" + RESET)
-        s.renderList(s.topKeys, false)
-    case modeSub:
-        fmt.Printf(CYAN+"%s -> 二级流媒体（空格 勾选/取消）"+RESET+"\n", s.curTop)
-        subs := s.subMap[s.curTop]
-        s.renderList(subs, true)
-    }
-    s.renderFooter()
-}
-
-func (s *tuiState) currentItems() []string {
-    if s.mode == modeTop {
-        return s.topKeys
-    }
-    return s.subMap[s.curTop]
-}
-
-func (s *tuiState) toggleCurrent() {
-    if s.mode != modeSub {
-        return
-    }
-    items := s.currentItems()
-    if len(items) == 0 {
-        return
-    }
-    sub := items[s.cursor]
-    key := s.curTop + "/" + sub
-    s.selected[key] = !s.selected[key]
-}
-
-func readKey() (string, error) {
-    buf := make([]byte, 3)
-    n, err := os.Stdin.Read(buf)
-    if err != nil {
-        return "", err
-    }
-    if n == 1 {
-        switch buf[0] {
-        case 'k':
-            return "up", nil
-        case 'j':
-            return "down", nil
-        case 'h':
-            return "left", nil
-        case 'l':
-            return "right", nil
-        case ' ': // space
-            return "space", nil
-        case 's', 'S':
-            return "save", nil
-        case 'm', 'M':
-            return "mode", nil
-        case 'e', 'E':
-            return "edit", nil
-        case 'q', 'Q':
-            return "quit", nil
-        case '?':
-            return "help", nil
-        case '\r', '\n':
-            return "enter", nil
-        default:
-            return string(buf[:1]), nil
-        }
-    }
-    if n >= 3 && buf[0] == 0x1b && buf[1] == '[' {
-        switch buf[2] {
-        case 'A':
-            return "up", nil
-        case 'B':
-            return "down", nil
-        case 'C':
-            return "right", nil
-        case 'D':
-            return "left", nil
-        }
-    }
-    return "", nil
-}
-
-func promptLine(prompt string) string {
-    // temporarily disable raw for line input
-    disableRaw()
-    defer enableRaw()
-    fmt.Print("\n" + YELLOW + prompt + RESET + " ")
-    r := bufio.NewReader(os.Stdin)
-    s, _ := r.ReadString('\n')
-    return strings.TrimSpace(s)
-}
-
-func (s *tuiState) saveSelection(cfg StreamConfig) string {
-    if s.method != "nameserver" && s.method != "address" {
-        return "请选择正确的添加方式(m)"
-    }
-    if strings.TrimSpace(s.ident) == "" {
-        return "请设置组名或IP (e)"
-    }
-    count := 0
-    for key, on := range s.selected {
-        if !on {
-            continue
-        }
-        parts := strings.SplitN(key, "/", 2)
-        if len(parts) != 2 {
-            continue
-        }
-        top := parts[0]
-        sub := parts[1]
-        domains := cfg[top][sub]
-        if len(domains) == 0 {
-            continue
-        }
-        _ = deletePlatformRules(sub)
-        _ = addDomainRules(s.method, domains, s.ident, sub)
-        count++
-    }
-    if count == 0 {
-        return "未选择任何平台，无需保存"
-    }
-    if s.sdActive {
-        ans := strings.ToLower(promptLine("是否重启 SmartDNS 应用新配置? (y/N)"))
-        if ans == "y" {
-            _ = runCmdInteractive("systemctl", "restart", "smartdns")
-        }
-    }
-    return fmt.Sprintf("保存成功，已写入 %d 个平台", count)
 }
 
 func initSelectionFromConfig(sel map[string]bool, cfg StreamConfig, topKeys []string) {
@@ -1577,22 +1292,48 @@ func initSelectionFromConfig(sel map[string]bool, cfg StreamConfig, topKeys []st
     }
 }
 
-func runTUI() {
-    // Load data
-    if !fileExists(streamConfigPath()) {
-        _ = downloadStreamConfig()
+type tvState struct {
+    app      *tview.Application
+    header   *tview.TextView
+    footer   *tview.TextView
+    left     *tview.List
+    right    *tview.List
+    dual     *tview.Flex
+    topOnly  *tview.Flex
+    subOnly  *tview.Flex
+    pages    *tview.Pages
+    help     bool
+    method   string
+    ident    string
+    sdActive bool
+    cfg      StreamConfig
+    topKeys  []string
+    subMap   map[string][]string
+    selected map[string]bool
+    curTop   string
+    single   bool // narrow terminal mode
+}
+
+func sortedKeys(m map[string][]string) []string {
+    keys := make([]string, 0, len(m))
+    for k := range m {
+        keys = append(keys, k)
     }
-    cfg, err := loadStreamConfig()
-    if err != nil {
-        logRed("读取 StreamConfig.yaml 失败: " + err.Error())
-        return
+    for i := 0; i < len(keys); i++ {
+        for j := i + 1; j < len(keys); j++ {
+            if strings.Compare(keys[i], keys[j]) > 0 {
+                keys[i], keys[j] = keys[j], keys[i]
+            }
+        }
     }
-    topKeys := make([]string, 0, len(cfg))
+    return keys
+}
+
+func buildTopSub(cfg StreamConfig) (topKeys []string, subMap map[string][]string) {
+    topKeys = make([]string, 0, len(cfg))
     for k := range cfg {
         topKeys = append(topKeys, k)
     }
-    // simple sort for stable order
-    // (no external deps)
     for i := 0; i < len(topKeys); i++ {
         for j := i + 1; j < len(topKeys); j++ {
             if strings.Compare(topKeys[i], topKeys[j]) > 0 {
@@ -1600,7 +1341,7 @@ func runTUI() {
             }
         }
     }
-    subMap := map[string][]string{}
+    subMap = map[string][]string{}
     for _, top := range topKeys {
         subs := make([]string, 0, len(cfg[top]))
         for s := range cfg[top] {
@@ -1615,88 +1356,297 @@ func runTUI() {
         }
         subMap[top] = subs
     }
+    return
+}
 
-    st := &tuiState{
-        mode:     modeTop,
-        topKeys:  topKeys,
-        subMap:   subMap,
-        selected: map[string]bool{},
+func (s *tvState) headerText() string {
+    status := "[red]未运行[-]"
+    if s.sdActive {
+        status = "[green]运行中[-]"
+    }
+    method := s.method
+    if method == "" { method = "(未设置)" }
+    ident := s.ident
+    if strings.TrimSpace(ident) == "" { ident = "(未设置)" }
+    return fmt.Sprintf("[yellow]SmartDNS 解锁编辑器[-] [cyan]%s[-]  SmartDNS: %s\n配置: %s\n列表: %s\n", SCRIPT_VERSION, status, SMART_CONFIG_FILE, streamConfigPath()) +
+        fmt.Sprintf("方式: [white]%s[-]  标识: [white]%s[-]", method, ident)
+}
+
+func (s *tvState) setHeader() { s.header.SetText(s.headerText()) }
+
+func (s *tvState) setFooter() {
+    if s.help {
+        s.footer.SetText("↑/↓/j/k 移动  →/l 进入  ←/h 返回  空格 勾选  m 切换方式  e 编辑标识  s 保存  q 退出")
+    } else {
+        s.footer.SetText("? 帮助  |  m 切换 nameserver/address  |  e 编辑组名/地址  |  s 保存  |  q 退出")
+    }
+}
+
+func (s *tvState) populateLeft() {
+    s.left.Clear()
+    for _, k := range s.topKeys {
+        k := k
+        s.left.AddItem(k, "", 0, func() {
+            s.curTop = k
+            s.populateRight()
+            if s.single {
+                s.pages.SwitchToPage("single-sub")
+                s.app.SetFocus(s.right)
+            } else {
+                s.app.SetFocus(s.right)
+            }
+        })
+    }
+}
+
+func (s *tvState) populateRight() {
+    s.right.Clear()
+    subs := s.subMap[s.curTop]
+    for _, sub := range subs {
+        sub := sub
+        key := s.curTop + "/" + sub
+        mark := "[ ]"
+        if s.selected[key] { mark = "[green][x][-]" }
+        s.right.AddItem(fmt.Sprintf("%s %s", mark, sub), "", 0, func() {
+            s.selected[key] = !s.selected[key]
+            s.populateRight()
+        })
+    }
+}
+
+func (s *tvState) showEditIdent() {
+    form := tview.NewForm()
+    label := "DNS 组名"
+    def := s.ident
+    if s.method == "address" { label = "DNS 服务器IP" }
+    input := tview.NewInputField().SetLabel(label+": ").SetText(def)
+    form.AddFormItem(input)
+    form.AddButton("确定", func() {
+        val := strings.TrimSpace(input.GetText())
+        if s.method == "address" && net.ParseIP(val) == nil {
+            input.SetTitle("无效IP")
+            return
+        }
+        if s.method == "nameserver" && val == "" {
+            input.SetTitle("不能为空")
+            return
+        }
+        s.ident = val
+        s.setHeader()
+        s.pages.RemovePage("modal")
+        s.app.SetFocus(s.right)
+    })
+    form.AddButton("取消", func(){ s.pages.RemovePage("modal"); })
+    form.SetBorder(true).SetTitle("编辑标识").SetTitleAlign(tview.AlignLeft)
+    modal := tview.NewFlex().SetDirection(tview.FlexRow).
+        AddItem(form, 0, 1, true)
+    s.pages.AddPage("modal", center(60, 7, modal), true, true)
+}
+
+func (s *tvState) saveSelection() {
+    if s.method != "nameserver" && s.method != "address" {
+        s.toast("请选择正确的添加方式 (m)")
+        return
+    }
+    if strings.TrimSpace(s.ident) == "" {
+        s.toast("请设置组名或IP (e)")
+        return
+    }
+    count := 0
+    for key, on := range s.selected {
+        if !on { continue }
+        parts := strings.SplitN(key, "/", 2)
+        if len(parts) != 2 { continue }
+        top := parts[0]
+        sub := parts[1]
+        domains := s.cfg[top][sub]
+        if len(domains) == 0 { continue }
+        _ = deletePlatformRules(sub)
+        _ = addDomainRules(s.method, domains, s.ident, sub)
+        count++
+    }
+    if count == 0 {
+        s.toast("未选择任何平台，无需保存")
+        return
+    }
+    if s.sdActive {
+        m := tview.NewModal().SetText(fmt.Sprintf("保存成功，已写入 %d 个平台\n是否重启 SmartDNS 应用新配置？", count)).
+            AddButtons([]string{"重启","稍后"}).SetDoneFunc(func(i int, l string){
+                s.pages.RemovePage("modal")
+                if i == 0 {
+                    _ = runCmdInteractive("systemctl", "restart", "smartdns")
+                    s.toast("已重启 SmartDNS")
+                } else {
+                    s.toast("保存完成")
+                }
+            })
+        s.pages.AddPage("modal", center(50, 7, m), true, true)
+    } else {
+        s.toast("保存完成 (SmartDNS 未运行)")
+    }
+}
+
+func (s *tvState) toast(msg string) {
+    m := tview.NewModal().SetText(msg).AddButtons([]string{"确定"}).SetDoneFunc(func(i int, l string){ s.pages.RemovePage("modal") })
+    s.pages.AddPage("modal", center(50, 5, m), true, true)
+}
+
+func center(w, h int, p tview.Primitive) tview.Primitive {
+    grid := tview.NewGrid().SetRows(0, h, 0).SetColumns(0, w, 0).AddItem(p, 1, 1, 1, 1, 0, 0, true)
+    return grid
+}
+
+func runTUI() {
+    if !fileExists(streamConfigPath()) { _ = downloadStreamConfig() }
+    cfg, err := loadStreamConfig()
+    if err != nil { logRed("读取 StreamConfig.yaml 失败: "+err.Error()); return }
+    topKeys, subMap := buildTopSub(cfg)
+
+    st := &tvState{
+        app:      tview.NewApplication(),
+        header:   tview.NewTextView().SetDynamicColors(true),
+        footer:   tview.NewTextView().SetDynamicColors(true),
+        left:     tview.NewList().ShowSecondaryText(false),
+        right:    tview.NewList().ShowSecondaryText(false),
+        pages:    tview.NewPages(),
         method:   "nameserver",
         ident:    "",
         sdActive: isSmartDNSActive(),
+        cfg:      cfg,
+        topKeys:  topKeys,
+        subMap:   subMap,
+        selected: map[string]bool{},
+        curTop:   "",
     }
-    // Preselect existing ones
     initSelectionFromConfig(st.selected, cfg, topKeys)
 
-    // Raw mode
-    enableRaw()
-    // handle Ctrl-C / SIGTERM to restore terminal state
-    sigc := make(chan os.Signal, 1)
-    signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
-    defer func() {
-        signal.Stop(sigc)
-        disableRaw()
-    }()
-    go func() {
-        <-sigc
-        disableRaw()
-        os.Exit(1)
-    }()
+    st.header.SetBorder(true).SetTitle("状态")
+    st.footer.SetBorder(true).SetTitle("帮助")
+    st.setHeader()
+    st.setFooter()
 
-    // Render loop
-    st.rows, st.cols = getTermSize()
-    st.render(cfg)
-    for {
-        key, err := readKey()
-        if err != nil {
-            break
-        }
-        switch key {
-        case "up":
-            st.cursor--
-        case "down":
-            st.cursor++
-        case "left":
-            if st.mode == modeSub {
-                st.mode = modeTop
-                st.cursor, st.scroll = 0, 0
+    st.left.SetBorder(true)
+    st.left.SetTitle("一级流媒体")
+    st.left.SetSelectedFunc(func(i int, main, sec string, r rune){})
+    st.left.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+        switch ev.Key() {
+        case tcell.KeyRight:
+            if idx := st.left.GetCurrentItem(); idx >= 0 && idx < len(st.topKeys) {
+                st.curTop = st.topKeys[idx]
+                st.populateRight()
+                if st.single { st.pages.SwitchToPage("single-sub") }
+                st.app.SetFocus(st.right)
             }
-        case "right", "enter":
-            if st.mode == modeTop {
-                if len(st.topKeys) > 0 {
-                    st.curTop = st.topKeys[st.cursor]
-                    st.mode = modeSub
-                    st.cursor, st.scroll = 0, 0
+            return nil
+        }
+        switch ev.Rune() {
+        case 'l':
+            if idx := st.left.GetCurrentItem(); idx >= 0 && idx < len(st.topKeys) {
+                st.curTop = st.topKeys[idx]
+                st.populateRight()
+                if st.single { st.pages.SwitchToPage("single-sub") }
+                st.app.SetFocus(st.right)
+            }
+            return nil
+        }
+        return ev
+    })
+
+    st.right.SetBorder(true).SetTitle("二级流媒体 (空格勾选)")
+    st.right.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+        switch ev.Key() {
+        case tcell.KeyLeft:
+            if st.single { st.pages.SwitchToPage("single-top") }
+            st.app.SetFocus(st.left)
+            return nil
+        case tcell.KeyRune:
+            if ev.Rune() == 'h' {
+                if st.single { st.pages.SwitchToPage("single-top") }
+                st.app.SetFocus(st.left)
+                return nil
+            }
+            if ev.Rune() == ' ' {
+                if idx := st.right.GetCurrentItem(); idx >= 0 {
+                    subs := st.subMap[st.curTop]
+                    if idx < len(subs) {
+                        key := st.curTop+"/"+subs[idx]
+                        st.selected[key] = !st.selected[key]
+                        st.populateRight()
+                    }
+                }
+                return nil
+            }
+        case tcell.KeyEnter:
+            if idx := st.right.GetCurrentItem(); idx >= 0 {
+                subs := st.subMap[st.curTop]
+                if idx < len(subs) {
+                    key := st.curTop+"/"+subs[idx]
+                    st.selected[key] = !st.selected[key]
+                    st.populateRight()
                 }
             }
-        case "space":
-            st.toggleCurrent()
-        case "mode":
-            if st.method == "nameserver" {
-                st.method = "address"
-            } else {
-                st.method = "nameserver"
-            }
-        case "edit":
-            if st.method == "nameserver" {
-                st.ident = promptLine("请输入 DNS 组名称 (例如: us)")
-            } else {
-                st.ident = promptLine("请输入 DNS 服务器IP (例如: 11.22.33.44)")
-            }
-        case "save":
-            msg := st.saveSelection(cfg)
-            // Show message one-shot
-            clearScreen(); moveHome()
-            fmt.Println(GREEN + msg + RESET)
-            fmt.Println("按任意键继续...")
-            _ , _ = readKey()
-        case "help":
-            st.help = !st.help
-        case "quit":
-            return
+            return nil
         }
-        st.clampCursor(len(st.currentItems()))
-        st.render(cfg)
+        return ev
+    })
+
+    st.populateLeft()
+    if len(st.topKeys) > 0 { st.curTop = st.topKeys[0] }
+    st.populateRight()
+
+    bodyDual := tview.NewFlex().AddItem(st.left, 0, 1, true).AddItem(st.right, 0, 2, false)
+    st.dual = tview.NewFlex().SetDirection(tview.FlexRow).AddItem(st.header, 5, 0, false).AddItem(bodyDual, 0, 1, true).AddItem(st.footer, 3, 0, false)
+
+    st.topOnly = tview.NewFlex().SetDirection(tview.FlexRow).AddItem(st.header, 5, 0, false).AddItem(st.left, 0, 1, true).AddItem(st.footer, 3, 0, false)
+    st.subOnly = tview.NewFlex().SetDirection(tview.FlexRow).AddItem(st.header, 5, 0, false).AddItem(st.right, 0, 1, true).AddItem(st.footer, 3, 0, false)
+
+    st.pages.AddPage("dual", st.dual, true, true)
+    st.pages.AddPage("single-top", st.topOnly, true, false)
+    st.pages.AddPage("single-sub", st.subOnly, true, false)
+
+    st.app.SetRoot(st.pages, true)
+    st.app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+        switch ev.Key() {
+        case tcell.KeyRune:
+            switch ev.Rune() {
+            case 'q': st.app.Stop(); return nil
+            case '?': st.help = !st.help; st.setFooter(); return nil
+            case 'm':
+                if st.method == "nameserver" { st.method = "address" } else { st.method = "nameserver" }
+                st.setHeader(); return nil
+            case 'e':
+                st.showEditIdent(); return nil
+            case 's':
+                st.saveSelection(); return nil
+            case 'h': // left on top-level when single
+                if st.single { st.pages.SwitchToPage("single-top"); st.app.SetFocus(st.left); return nil }
+            case 'l': // right to sub when single
+                if st.single { st.pages.SwitchToPage("single-sub"); st.app.SetFocus(st.right); return nil }
+            }
+        case tcell.KeyLeft:
+            if st.single { st.pages.SwitchToPage("single-top"); st.app.SetFocus(st.left); return nil }
+        case tcell.KeyRight:
+            if st.single { st.pages.SwitchToPage("single-sub"); st.app.SetFocus(st.right); return nil }
+        }
+        return ev
+    })
+
+    st.app.SetBeforeDrawFunc(func(screen tcell.Screen) bool {
+        w, _ := screen.Size()
+        narrow := w < 90
+        if narrow != st.single {
+            st.single = narrow
+            if narrow {
+                st.pages.SwitchToPage("single-top")
+            } else {
+                st.pages.SwitchToPage("dual")
+            }
+        }
+        return false
+    })
+
+    if err := st.app.Run(); err != nil {
+        logRed("TUI 运行失败: "+err.Error())
     }
 }
 
