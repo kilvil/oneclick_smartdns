@@ -3,6 +3,7 @@ package src
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	tcell "github.com/gdamore/tcell/v2"
@@ -11,6 +12,16 @@ import (
 
 func isSmartDNSActive() bool {
 	out, _ := runCmdCapture("systemctl", "is-active", "smartdns")
+	return strings.TrimSpace(out) == "active"
+}
+
+func isSniproxyActive() bool {
+	out, _ := runCmdCapture("systemctl", "is-active", "sniproxy")
+	return strings.TrimSpace(out) == "active"
+}
+
+func isSystemResolverActive() bool {
+	out, _ := runCmdCapture("systemctl", "is-active", "systemd-resolved")
 	return strings.TrimSpace(out) == "active"
 }
 
@@ -51,6 +62,8 @@ type tvState struct {
 	method   string
 	ident    string
 	sdActive bool
+	snActive bool
+	syActive bool
 	cfg      StreamConfig
 	topKeys  []string
 	subMap   map[string][]string
@@ -133,11 +146,22 @@ func (s *tvState) headerText() string {
 	if s.sdActive {
 		sd = "SmartDNS: [green]运行中[-]"
 	}
+	sni := "sniproxy: [red]未运行[-]"
+	if s.snActive {
+		sni = "sniproxy: [green]运行中[-]"
+	}
+	sy := "systemd-resolved: [green]运行中[-]"
+	if !s.syActive {
+		sy = "systemd-resolved: [gray]已停用[-]"
+	} else if s.sdActive {
+		// concurrent running may cause conflict
+		sy = "systemd-resolved: [yellow]运行(可能冲突)[-]"
+	}
 	grp := "组: [gray]无[-]"
 	if s.activeGroup != "" {
 		grp = "组: [green]" + s.activeGroup + "[-]"
 	}
-	return fmt.Sprintf(" %s  |  %s  |  %s  |  %s", way, dns, sd, grp)
+	return fmt.Sprintf(" %s  |  %s  |  %s  |  %s  |  %s  |  %s", way, dns, sd, sni, sy, grp)
 }
 
 func (s *tvState) setHeader() { s.header.SetDynamicColors(true).SetText(s.headerText()) }
@@ -345,6 +369,7 @@ func (s *tvState) saveSelectionSilent() (int, error) {
 		}
 	}
 	count := 0
+	snSync := fileExists(SNIPROXY_CONFIG)
 	for key, on := range s.selected {
 		if !on {
 			continue
@@ -361,6 +386,11 @@ func (s *tvState) saveSelectionSilent() (int, error) {
 		}
 		_ = deletePlatformRules(sub)
 		_ = addDomainRules(s.method, domains, s.ident, sub)
+		if snSync {
+			if err := syncSubToSniproxy(s.cfg, top, sub); err != nil {
+				logYellow("同步 sniproxy 失败: " + err.Error())
+			}
+		}
 		count++
 	}
 	if count > 0 {
@@ -383,11 +413,41 @@ func center(w, h int, p tview.Primitive) tview.Primitive {
 	return grid
 }
 
+func (s *tvState) openConfigViewer(title, path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		s.toast("读取配置失败: " + err.Error())
+		return
+	}
+	view := tview.NewTextView().
+		SetText(string(data)).
+		SetScrollable(true).
+		SetWrap(false).
+		SetDynamicColors(true).
+		SetBorder(true).
+		SetTitle(fmt.Sprintf("%s (Esc/q 关闭)", title)).
+		SetTitleAlign(tview.AlignLeft)
+	view.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyEsc || ev.Rune() == 'q' {
+			s.pages.RemovePage("modal-config")
+			return nil
+		}
+		return ev
+	})
+	if s.pages.HasPage("modal-config") {
+		s.pages.RemovePage("modal-config")
+	}
+	s.pages.AddPage("modal-config", center(100, 30, view), true, true)
+	s.app.SetFocus(view)
+}
+
 // flushUI refreshes runtime states and re-renders current page safely.
 func (s *tvState) flushUI() {
 	s.app.QueueUpdateDraw(func() {
 		// refresh runtime/service states
 		s.sdActive = isSmartDNSActive()
+		s.snActive = isSniproxyActive()
+		s.syActive = isSystemResolverActive()
 		// reload groups and assignments as files may have changed after install/uninstall
 		s.reloadGroups()
 		s.refreshAssignments()
@@ -433,6 +493,8 @@ func runTUI() {
 		method:   "nameserver",
 		ident:    "",
 		sdActive: isSmartDNSActive(),
+		snActive: isSniproxyActive(),
+		syActive: isSystemResolverActive(),
 		cfg:      cfg,
 		topKeys:  topKeys,
 		subMap:   subMap,
@@ -758,6 +820,10 @@ func (s *tvState) openSmartDNSActions() {
 		s.flushUI()
 		s.toast("已重启 SmartDNS")
 	})
+	list.AddItem("查看配置", SMART_CONFIG_FILE, 0, func() {
+		s.pages.RemovePage("modal")
+		s.openConfigViewer("SmartDNS 配置", SMART_CONFIG_FILE)
+	})
 	list.AddItem("返回", "", 0, func() { s.pages.RemovePage("modal"); s.openServiceManager() })
 	s.pages.AddPage("modal", center(50, 14, list), true, true)
 }
@@ -786,20 +852,30 @@ func (s *tvState) openSniproxyActions() {
 	list.AddItem("启动", "", 0, func() {
 		s.pages.RemovePage("modal")
 		restoreSniproxy()
+		s.snActive = isSniproxyActive()
+		s.setHeader()
 		s.flushUI()
 		s.toast("已启动 sniproxy 并设置开机自启")
 	})
 	list.AddItem("停止", "", 0, func() {
 		s.pages.RemovePage("modal")
 		stopSniproxy()
+		s.snActive = isSniproxyActive()
+		s.setHeader()
 		s.flushUI()
 		s.toast("已停止 sniproxy 并关闭开机自启")
 	})
 	list.AddItem("重启", "", 0, func() {
 		s.pages.RemovePage("modal")
 		restartSniproxy()
+		s.snActive = isSniproxyActive()
+		s.setHeader()
 		s.flushUI()
 		s.toast("已重启 sniproxy")
+	})
+	list.AddItem("查看配置", SNIPROXY_CONFIG, 0, func() {
+		s.pages.RemovePage("modal")
+		s.openConfigViewer("sniproxy 配置", SNIPROXY_CONFIG)
 	})
 	list.AddItem("返回", "", 0, func() { s.pages.RemovePage("modal"); s.openServiceManager() })
 	s.pages.AddPage("modal", center(50, 12, list), true, true)
@@ -967,6 +1043,9 @@ func (s *tvState) openGroupsPage() {
 			switch ev.Rune() {
 			case 'n', 'N':
 				s.showAddGroupModal(func() { s.openGroupsPage() })
+				return nil
+			case 'z', 'Z':
+				s.openServiceManager()
 				return nil
 			case 'd', 'D':
 				if len(s.groups) == 0 {
