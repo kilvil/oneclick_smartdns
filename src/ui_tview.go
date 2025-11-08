@@ -53,20 +53,20 @@ type tvState struct {
     app      *tview.Application
     header   *tview.TextView
     footer   *tview.TextView
-	left     *tview.List
-	right    *tview.List
-	dual     *tview.Flex
-	topOnly  *tview.Flex
-	subOnly  *tview.Flex
-	pages    *tview.Pages
-	method   string
-	ident    string
-	sdActive bool
+    left     *tview.List
+    right    *tview.List
+    dual     *tview.Flex
+    topOnly  *tview.Flex
+    subOnly  *tview.Flex
+    pages    *tview.Pages
+    method   string
+    ident    string
+    sdActive bool
     ngActive bool
-	syActive bool
-	cfg      StreamConfig
-	topKeys  []string
-	subMap   map[string][]string
+    syActive bool
+    cfg      StreamConfig
+    topKeys  []string
+    subMap   map[string][]string
     selected map[string]bool
     curTop   string
     single   bool
@@ -75,9 +75,13 @@ type tvState struct {
     activeGroup string
     selfPubV4   string
 
-	assigned map[string]Assignment // sub -> assignment parsed from config
+    assigned map[string]Assignment // sub -> assignment parsed from config
 
-	dirty bool // 有未保存更改
+    dirty bool // 有未保存更改
+
+    // initial service states at app start; used for exit restart prompt
+    initialSdActive bool
+    initialNgActive bool
 }
 
 func sortedKeys(m map[string][]string) []string {
@@ -616,6 +620,9 @@ func runTUI() {
     }
     // try detect public IPv4 early for special unlock group
     st.selfPubV4 = getPublicIPv4()
+    // record initial service states for exit prompt
+    st.initialSdActive = st.sdActive
+    st.initialNgActive = st.ngActive
 	initSelectionFromConfig(st.selected, cfg, topKeys)
 	st.reloadGroups()
 
@@ -1480,9 +1487,9 @@ func (s *tvState) openGroupsPage() {
             s.toast("未能自动获取公网 IPv4，请按 e 手动设置")
         }
     })
-	list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
-		if ev.Key() == tcell.KeyRune {
-			switch ev.Rune() {
+    list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+        if ev.Key() == tcell.KeyRune {
+            switch ev.Rune() {
 			case 'n', 'N':
 				s.showAddGroupModal(func() { s.openGroupsPage() })
 				return nil
@@ -1505,17 +1512,17 @@ func (s *tvState) openGroupsPage() {
 			case 'r', 'R':
 				s.openGroupsPage()
 				return nil
-			case 'q', 'Q':
-				s.app.Stop()
-				return nil
-			}
-		}
-		if ev.Key() == tcell.KeyEsc {
-			s.app.Stop()
-			return nil
-		}
-		return ev
-	})
+            case 'q', 'Q':
+                s.confirmExit()
+                return nil
+            }
+        }
+        if ev.Key() == tcell.KeyEsc {
+            s.confirmExit()
+            return nil
+        }
+        return ev
+    })
 	// add/replace the "groups" page
 	if s.pages.HasPage("groups") {
 		s.pages.RemovePage("groups")
@@ -1523,6 +1530,49 @@ func (s *tvState) openGroupsPage() {
 	body := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(s.header, 5, 0, false).AddItem(list, 0, 1, true).AddItem(s.footer, 3, 0, false)
 	s.pages.AddPage("groups", body, true, true)
 	s.pages.SwitchToPage("groups")
+}
+
+// confirmExit prompts to optionally restart originally running services (smartdns/nginx) before exiting.
+func (s *tvState) confirmExit() {
+    toRestart := []string{}
+    if s.initialSdActive {
+        toRestart = append(toRestart, "smartdns")
+    }
+    if s.initialNgActive {
+        toRestart = append(toRestart, "nginx")
+    }
+    if len(toRestart) == 0 {
+        s.app.Stop()
+        return
+    }
+    text := "退出前是否重启以下已运行服务以应用最新配置？\n\n"
+    for _, svc := range toRestart { text += " - " + svc + "\n" }
+    m := tview.NewModal().
+        SetText(text).
+        AddButtons([]string{"重启并退出", "直接退出", "取消"}).
+        SetDoneFunc(func(i int, l string) {
+            s.pages.RemovePage("modal-exit")
+            switch i {
+            case 0:
+                // restart selected services with log, then exit
+                logView := s.openLogModal("重启服务并退出")
+                go func() {
+                    append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+                    for _, svc := range toRestart {
+                        append("重启 " + svc + " ...")
+                        _ = runCmdPipe(append, "systemctl", "restart", svc)
+                    }
+                    append("完成: 正在退出 ...")
+                    s.app.QueueUpdateDraw(func(){ s.pages.RemovePage("modal-log") })
+                    s.app.Stop()
+                }()
+            case 1:
+                s.app.Stop()
+            default:
+                // cancel
+            }
+        })
+    s.pages.AddPage("modal-exit", center(60, 12, m), true, true)
 }
 
 func (s *tvState) confirmDeleteGroup(target dnsGroup) {
