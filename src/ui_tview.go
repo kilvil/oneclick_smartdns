@@ -412,6 +412,8 @@ func (s *tvState) saveSelectionSilent() (int, error) {
     tgt := s.targetAssignment()
     changed := 0
     ngReady := fileExists(NGINX_MAIN_CONF)
+    // Ensure base SmartDNS options exist
+    _ = ensureSmartDNSBaseDirectives()
     // Build a quick set of selected subs (by sub name)
     selSubs := map[string]bool{}
     for key, on := range s.selected {

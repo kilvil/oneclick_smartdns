@@ -120,13 +120,18 @@ func installSmartDNSStream(log func(string)) error {
 	if _, err := os.Stat(installPath); err != nil {
 		return fmt.Errorf("未找到安装脚本: %s", installPath)
 	}
-	_ = os.Chmod(installPath, 0o755)
-	log("执行安装脚本: " + installPath + " -i")
-	if err := runCmdPipe(func(s string) { log(s) }, installPath, "-i"); err != nil {
-		return fmt.Errorf("安装脚本失败: %w", err)
-	}
-	log("SmartDNS 安装成功！")
-	return nil
+    _ = os.Chmod(installPath, 0o755)
+    log("执行安装脚本: " + installPath + " -i")
+    if err := runCmdPipe(func(s string) { log(s) }, installPath, "-i"); err != nil {
+        return fmt.Errorf("安装脚本失败: %w", err)
+    }
+    // Ensure recommended SmartDNS directives are present
+    log("写入推荐 SmartDNS 选项 …")
+    if err := ensureSmartDNSBaseDirectives(); err != nil {
+        log("[警告] 写入推荐选项失败: " + err.Error())
+    }
+    log("SmartDNS 安装成功！")
+    return nil
 }
 
 func removeIfExists(path string) error {

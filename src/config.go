@@ -182,6 +182,44 @@ func removeDefaultServerAt(idx int) error {
 	return setDefaultServers(next)
 }
 
+// ensureSmartDNSBaseDirectives appends a set of recommended SmartDNS directives
+// to SMART_CONFIG_FILE if the exact desired lines are not already present.
+// When appending, these lines are placed at the end of file so they take
+// precedence over earlier conflicting values (SmartDNS uses last-one-wins).
+func ensureSmartDNSBaseDirectives() error {
+    if err := ensureSmartDNSDir(); err != nil { return err }
+    req := []string{
+        "dualstack-ip-selection no",
+        "speed-check-mode none",
+        "serve-expired-prefetch-time 21600",
+        "prefetch-domain yes",
+        "cache-size 32768",
+        "cache-persist yes",
+        "cache-file /etc/smartdns/cache",
+        "serve-expired yes",
+        "serve-expired-ttl 259200",
+        "serve-expired-reply-ttl 3",
+        "cache-checkpoint-time 86400",
+    }
+    if !fileExists(SMART_CONFIG_FILE) {
+        // create with default template which already contains these
+        return os.WriteFile(SMART_CONFIG_FILE, []byte(defaultSmartDNSConfig), 0o644)
+    }
+    lines, err := readLines(SMART_CONFIG_FILE)
+    if err != nil { return err }
+    have := map[string]bool{}
+    for _, l := range lines { have[strings.TrimSpace(l)] = true }
+    toAdd := []string{}
+    for _, want := range req {
+        if !have[want] { toAdd = append(toAdd, want) }
+    }
+    if len(toAdd) == 0 { return nil }
+    // append a blank line then desired directives
+    out := append(lines, "")
+    out = append(out, toAdd...)
+    return writeLines(SMART_CONFIG_FILE, out)
+}
+
 func configureSmartDNS(r *bufio.Reader) {
 	logBlue("正在配置 SmartDNS...")
 	if err := ensureSmartDNSDir(); err != nil {
