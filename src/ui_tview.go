@@ -902,6 +902,40 @@ func (s *tvState) openServiceManager() {
         s.pages.RemovePage("modal")
         s.confirmEmergencyResetDNS()
     })
+    options.AddItem("更新流媒体配置 (StreamConfig.yaml)", "从远程源拉取并刷新界面", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("更新流媒体配置")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            append("下载最新 StreamConfig.yaml ...")
+            if err := downloadStreamConfig(); err != nil {
+                append("[失败] 下载失败: " + err.Error())
+                return
+            }
+            append("解析配置 ...")
+            newCfg, err := loadStreamConfig()
+            if err != nil {
+                append("[失败] 解析失败: " + err.Error())
+                return
+            }
+            s.app.QueueUpdateDraw(func() {
+                s.cfg = newCfg
+                s.topKeys, s.subMap = buildTopSub(newCfg)
+                if s.curTop == "" || len(s.subMap[s.curTop]) == 0 {
+                    if len(s.topKeys) > 0 {
+                        s.curTop = s.topKeys[0]
+                    }
+                }
+                s.refreshAssignments()
+                s.resetSelectionForActiveGroup()
+                s.populateLeft()
+                s.populateRight()
+                s.setHeader()
+                s.setFooter()
+            })
+            append("[完成] 已更新并应用最新流媒体配置")
+        }()
+    })
     options.AddItem("覆盖系统 DNS -> 127.0.0.1", "停用 systemd-resolved 并写入 /etc/resolv.conf", 0, func() {
         s.pages.RemovePage("modal")
         logView := s.openLogModal("覆盖系统 DNS -> 127.0.0.1")
