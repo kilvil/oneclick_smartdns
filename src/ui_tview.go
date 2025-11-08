@@ -103,9 +103,9 @@ func (s *tvState) setHeader() { s.header.SetDynamicColors(true).SetText(s.header
 func (s *tvState) setFooter() {
     s.footer.SetDynamicColors(true)
     if s.help {
-        s.footer.SetText("q 退出 | 空格: 二级勾选/一级全选 | Enter 勾选 | 方向键切换 | g 返回分组 | n 新建分组 | r 刷新分组 | m 切换方式 | e 编辑标识 | s 保存 | z 服务管理 | ? 帮助")
+        s.footer.SetText("q 退出 | 空格: 二级勾选/一级全选 | Enter 勾选 | 方向键切换 | h/l 切换面板 | g 返回分组 | n 新建分组 | r 刷新分组 | m 切换方式 | e 编辑标识 | s 保存 | z 服务管理 | Esc 关闭弹窗 | ? 帮助")
     } else {
-        txt := "? 帮助  |  空格: 二级勾选 / 一级全选  |  g 返回分组  n 新建分组  r 刷新分组  |  m 切换 nameserver/address  |  e 编辑组名/地址  |  s 保存  |  z 服务管理  |  q 退出"
+        txt := "? 帮助  |  空格: 二级勾选 / 一级全选  |  h/l 切换面板  |  g 返回分组  n 新建分组  r 刷新分组  |  m 切换 nameserver/address  |  e 编辑组名/地址  |  s 保存  |  z 服务管理  |  q 退出"
         if s.dirty {
             txt += "  [yellow]有未保存更改[-]，按 s 保存"
         }
@@ -640,7 +640,7 @@ func (s *tvState) openGroupsPage() {
     s.setHeader()
     list := tview.NewList().ShowSecondaryText(false)
     list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, R刷新, Q退出)")
-    s.footer.SetText("Enter 进入配置  |  n 新建分组  r 刷新  |  q 退出  |  进入配置后按 s 保存")
+    s.footer.SetText("Enter 进入配置  |  n 新建分组  r 刷新  |  z 服务管理  |  ? 帮助  |  q 退出  |  进入配置后按 s 保存")
     // refresh groups data
     s.reloadGroups()
     for _, g := range s.groups {
