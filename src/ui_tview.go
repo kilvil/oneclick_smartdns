@@ -1076,7 +1076,7 @@ func (s *tvState) confirmUninstallSmartDNS() {
 func (s *tvState) openNginxActions() {
     list := tview.NewList().ShowSecondaryText(false)
     list.SetBorder(true).SetTitle("Nginx")
-    list.AddItem("安装", "通过 apt 安装 nginx 并启用", 0, func() {
+    list.AddItem("安装 (nginx-extras)", "通过 apt 安装 nginx-extras 并启用", 0, func() {
         s.pages.RemovePage("modal")
         logView := s.openLogModal("安装 Nginx")
         go func() {
@@ -1085,6 +1085,24 @@ func (s *tvState) openNginxActions() {
                 append("[失败] " + err.Error())
             } else {
                 append("[完成] Nginx 安装成功")
+            }
+            s.flushUI()
+        }()
+    })
+    list.AddItem("修复并加载 stream 模块", "写入模块加载文件并校验 nginx -t", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("修复 Nginx stream 模块")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            if err := writeStreamLoaderConf(); err != nil {
+                append("写入模块加载文件失败: " + err.Error())
+            } else {
+                append("已写入 /etc/nginx/modules-enabled/50-mod-stream.conf")
+            }
+            if err := nginxTestAndReload(append); err != nil {
+                append("[失败] nginx -t 或重载失败: " + err.Error())
+            } else {
+                append("[完成] 模块加载并校验成功")
             }
             s.flushUI()
         }()

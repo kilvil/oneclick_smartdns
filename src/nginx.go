@@ -11,10 +11,15 @@ import (
 // installNginxStream installs nginx via apt and enables the service. Logs stream into provided logger.
 func installNginxStream(log func(string)) error {
     if log == nil { log = func(string){} }
+    // 预写入模块加载文件，避免系统已有 stream{} 时 postinst 失败
+    if err := writeStreamLoaderConf(); err == nil {
+        log("已写入模块加载文件 /etc/nginx/modules-enabled/50-mod-stream.conf")
+    }
     log("执行: apt-get update")
     if err := runCmdPipe(func(s string){ log(s) }, "apt-get", "update"); err != nil { return err }
-    log("执行: apt-get install -y nginx libnginx-mod-stream")
-    if err := runCmdPipe(func(s string){ log(s) }, "apt-get", "install", "-y", "nginx", "libnginx-mod-stream"); err != nil { return err }
+    // 使用 nginx-extras（包含大部分模块），更省心
+    log("执行: apt-get install -y nginx-extras")
+    if err := runCmdPipe(func(s string){ log(s) }, "apt-get", "install", "-y", "nginx-extras"); err != nil { return err }
     log("启动并启用 nginx 服务")
     _ = runCmdPipe(func(s string){ log(s) }, "systemctl", "enable", "nginx")
     _ = runCmdPipe(func(s string){ log(s) }, "systemctl", "start", "nginx")
@@ -91,7 +96,13 @@ func ensureNginxStreamModules(log func(string)) error {
         if !havePreread { missing = append(missing, sslPrereadSo) }
         return errors.New("缺少 Nginx stream 动态模块: " + strings.Join(missing, ", ") + "。请安装包 libnginx-mod-stream 并重试")
     }
-    // Write loader file if not present
+    // Ensure loader exists now that modules are present
+    if err := writeStreamLoaderConf(); err != nil { return err }
+    return nil
+}
+
+// writeStreamLoaderConf writes the modules-enabled loader file unconditionally (idempotent).
+func writeStreamLoaderConf() error {
     _ = os.MkdirAll("/etc/nginx/modules-enabled", 0o755)
     loader := "/etc/nginx/modules-enabled/50-mod-stream.conf"
     content := strings.Join([]string{
@@ -100,8 +111,7 @@ func ensureNginxStreamModules(log func(string)) error {
         "load_module modules/ngx_stream_ssl_preread_module.so;",
         "",
     }, "\n")
-    if err := writeFileIfChanged(loader, content, 0o644); err != nil { return err }
-    return nil
+    return writeFileIfChanged(loader, content, 0o644)
 }
 
 // ensureNginxStreamInclude adds a top-level stream block or ensures include directive exists.
