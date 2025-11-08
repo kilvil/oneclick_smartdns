@@ -1,10 +1,10 @@
 package src
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"strings"
+    "fmt"
+    "os"
+    "os/exec"
+    "strings"
 )
 
 func manageService(service, action, desc string) error {
@@ -80,6 +80,24 @@ func stopSniproxy() {
 func restartService(service string) { _ = manageService(service, "restart", "重启") }
 func restartSmartDNS()              { restartService("smartdns") }
 func restartSniproxy()              { restartService("sniproxy") }
+
+// ensureSniproxyOverride ensures systemd drop-in sets explicit config path for sniproxy.
+// Some distributions ship a unit with ExecStart="/usr/sbin/sniproxy -f" only,
+// which may fail to auto-detect config or makes debugging harder. We create a
+// drop-in to make it explicit: -c /etc/sniproxy.conf
+func ensureSniproxyOverride() error {
+    dir := "/etc/systemd/system/sniproxy.service.d"
+    if err := os.MkdirAll(dir, 0o755); err != nil {
+        return err
+    }
+    content := "[Service]\nExecStart=\nExecStart=/usr/sbin/sniproxy -f -c /etc/sniproxy.conf\n"
+    if err := os.WriteFile(dir+"/override.conf", []byte(content), 0o644); err != nil {
+        return err
+    }
+    // reload daemon to apply drop-in
+    _, _ = runCmdCapture("systemctl", "daemon-reload")
+    return nil
+}
 
 // emergencyResetDNS stops smartdns and systemd-resolved, then writes resolv.conf to 8.8.8.8
 // This helps recover networking when DNS is misconfigured.

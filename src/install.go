@@ -13,37 +13,43 @@ import (
 )
 
 func installSniproxy() {
-	logBlue("安装 sniproxy...")
-	if err := runCmdInteractive("apt-get", "update"); err != nil {
-		logRed("apt-get update 失败，请检查网络或源配置。")
-		return
-	}
-	if err := runCmdInteractive("apt-get", "install", "-y", "sniproxy"); err != nil {
-		logRed("安装 sniproxy 失败，可能源中无该包或网络不可达。")
-		return
-	}
-	restoreSniproxy()
-	logGreen("sniproxy 安装完成。")
+    logBlue("安装 sniproxy...")
+    _ = installSniproxyStream(func(s string) { fmt.Println(s) })
 }
 
 // Streaming, non-interactive installer for sniproxy. All outputs are sent to log.
 func installSniproxyStream(log func(string)) error {
-	if log == nil {
-		log = func(string) {}
-	}
-	log("执行: apt-get update")
-	if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "update"); err != nil {
-		return err
-	}
-	log("执行: apt-get install -y sniproxy")
-	if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "install", "-y", "sniproxy"); err != nil {
-		return err
-	}
-	log("启动并设置开机自启 sniproxy")
-	_ = runCmdPipe(func(s string) { log(s) }, "systemctl", "start", "sniproxy")
-	_ = runCmdPipe(func(s string) { log(s) }, "systemctl", "enable", "sniproxy")
-	log("sniproxy 安装完成")
-	return nil
+    if log == nil {
+        log = func(string) {}
+    }
+    tmp := "/tmp/sniproxy_installer"
+    _ = os.MkdirAll(tmp, 0o755)
+    script := filepath.Join(tmp, "smtdns_install.sh")
+    log("下载安装脚本: " + REMOTE_SNIPROXY_INSTALLER_URL)
+    // 使用我们自带的 HTTP 客户端，避免依赖 wget 是否存在
+    if err := downloadToFile(REMOTE_SNIPROXY_INSTALLER_URL, script, 180*time.Second); err != nil {
+        log("下载失败: " + err.Error())
+        // 回退：尝试用 wget，输出更接近你的命令
+        log("尝试使用 wget 下载 ...")
+        if err2 := runCmdPipe(func(s string) { log(s) }, "bash", "-lc", "wget '"+REMOTE_SNIPROXY_INSTALLER_URL+"' -O '"+script+"'"); err2 != nil {
+            return fmt.Errorf("下载安装脚本失败: %v", err2)
+        }
+    }
+    _ = os.Chmod(script, 0o755)
+    log("执行安装脚本 ...")
+    if err := runCmdPipe(func(s string) { log(s) }, "bash", script); err != nil {
+        return fmt.Errorf("安装脚本执行失败: %w", err)
+    }
+    // 写入 drop-in，显式指定配置路径
+    log("写入 systemd drop-in (-c /etc/sniproxy.conf)")
+    if err := ensureSniproxyOverride(); err != nil {
+        log("[警告] 写入 drop-in 失败: " + err.Error())
+    }
+    log("启动并设置开机自启 sniproxy")
+    _ = runCmdPipe(func(s string) { log(s) }, "systemctl", "start", "sniproxy")
+    _ = runCmdPipe(func(s string) { log(s) }, "systemctl", "enable", "sniproxy")
+    log("sniproxy 安装完成")
+    return nil
 }
 
 func extractTarGz(srcPath, dstDir string) error {

@@ -960,6 +960,10 @@ func (s *tvState) openSniproxyActions() {
 		logView := s.openLogModal("启动 sniproxy")
 		go func() {
 			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("写入 systemd drop-in，指定 -c /etc/sniproxy.conf ...")
+			if err := ensureSniproxyOverride(); err != nil {
+				append("[警告] 写入 drop-in 失败: " + err.Error())
+			}
 			append("启动 sniproxy ...")
 			_ = runCmdPipe(append, "systemctl", "start", "sniproxy")
 			append("启用 sniproxy 开机自启 ...")
@@ -986,6 +990,10 @@ func (s *tvState) openSniproxyActions() {
 		logView := s.openLogModal("重启 sniproxy")
 		go func() {
 			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("写入 systemd drop-in，指定 -c /etc/sniproxy.conf ...")
+			if err := ensureSniproxyOverride(); err != nil {
+				append("[警告] 写入 drop-in 失败: " + err.Error())
+			}
 			append("重启 sniproxy ...")
 			_ = runCmdPipe(append, "systemctl", "restart", "sniproxy")
 			append("完成: sniproxy 已重启")
