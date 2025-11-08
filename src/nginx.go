@@ -100,13 +100,9 @@ func ensureNginxStreamModules(log func(string)) error {
 	// Verify dynamic modules exist
 	modDir := "/usr/lib/nginx/modules"
 	s1 := filepath.Join(modDir, "ngx_stream_module.so")
-	s2 := filepath.Join(modDir, "ngx_stream_ssl_preread_module.so")
 	missing := []string{}
 	if !fileExists(s1) {
 		missing = append(missing, s1)
-	}
-	if !fileExists(s2) {
-		missing = append(missing, s2)
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("缺少 Nginx stream 动态模块: %s\n请安装 nginx-extras 或 libnginx-mod-stream，并执行 'dpkg --configure -a' / 'apt -f install' 完成配置。", strings.Join(missing, ", "))
