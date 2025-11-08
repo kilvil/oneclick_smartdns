@@ -144,7 +144,7 @@ func (s *tvState) setHeader() { s.header.SetDynamicColors(true).SetText(s.header
 
 func (s *tvState) setFooter() {
 	s.footer.SetDynamicColors(true)
-	txt := "空格: 二级勾选 / 一级全选  |  Enter 勾选  |  方向键切换  |  h/l 切换面板  |  g 返回分组  n 新建分组  r 刷新分组  |  m 切换方式  |  e 编辑组名/地址  |  s 保存  |  z 服务管理  |  q(分组页)退出  |  Esc 关闭弹窗"
+	txt := "空格: 二级勾选 / 一级全选  |  Enter 勾选  |  方向键切换  |  h/l 切换面板  |  n 新建分组  d 删除分组  r 刷新分组  |  m 切换方式  |  e 编辑组名/地址  |  s 保存  |  z 服务管理  |  q 返回分组/退出  |  Esc 关闭弹窗"
 	if s.dirty {
 		txt += "  [yellow]有未保存更改[-]，按 s 保存"
 	}
@@ -610,23 +610,6 @@ func runTUI() {
 		case tcell.KeyRune:
 			switch ev.Rune() {
 			case 'q':
-				st.toast("请先按 g 返回分组列表，再按 q 退出")
-				return nil
-			case 'm':
-				if st.method == "nameserver" {
-					st.method = "address"
-				} else {
-					st.method = "nameserver"
-				}
-				st.setHeader()
-				return nil
-			case 'e':
-				st.showEditIdent()
-				return nil
-			case 's':
-				st.saveSelection()
-				return nil
-			case 'g':
 				if st.dirty {
 					m := tview.NewModal().
 						SetText("当前分组有未保存更改。\n是否保存并返回分组列表？").
@@ -654,6 +637,20 @@ func runTUI() {
 				} else {
 					st.openGroupsPage()
 				}
+				return nil
+			case 'm':
+				if st.method == "nameserver" {
+					st.method = "address"
+				} else {
+					st.method = "nameserver"
+				}
+				st.setHeader()
+				return nil
+			case 'e':
+				st.showEditIdent()
+				return nil
+			case 's':
+				st.saveSelection()
 				return nil
 			case 'n':
 				st.showAddGroupModal(nil)
@@ -937,8 +934,8 @@ func (s *tvState) openGroupsPage() {
 	s.activeGroup = ""
 	s.setHeader()
 	list := tview.NewList().ShowSecondaryText(false)
-	list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, R刷新, Q退出)")
-	s.footer.SetText("Enter 进入配置  |  n 新建分组  r 刷新  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
+	list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, Q退出)")
+	s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
 	// refresh groups data
 	s.reloadGroups()
 	for _, g := range s.groups {
@@ -971,6 +968,16 @@ func (s *tvState) openGroupsPage() {
 			case 'n', 'N':
 				s.showAddGroupModal(func() { s.openGroupsPage() })
 				return nil
+			case 'd', 'D':
+				if len(s.groups) == 0 {
+					return nil
+				}
+				idx := list.GetCurrentItem()
+				if idx < 0 || idx >= len(s.groups) {
+					return nil
+				}
+				s.confirmDeleteGroup(s.groups[idx])
+				return nil
 			case 'r', 'R':
 				s.openGroupsPage()
 				return nil
@@ -992,4 +999,24 @@ func (s *tvState) openGroupsPage() {
 	body := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(s.header, 5, 0, false).AddItem(list, 0, 1, true).AddItem(s.footer, 3, 0, false)
 	s.pages.AddPage("groups", body, true, true)
 	s.pages.SwitchToPage("groups")
+}
+
+func (s *tvState) confirmDeleteGroup(target dnsGroup) {
+	text := fmt.Sprintf("确认删除分组 %s (%s)？\n仅会移除 smartdns.conf 中的该上游配置。", target.Name, target.IP)
+	m := tview.NewModal().SetText(text).AddButtons([]string{"删除", "取消"}).SetDoneFunc(func(i int, l string) {
+		s.pages.RemovePage("modal-del-group")
+		if i == 0 {
+			if err := deleteGroupFromConfig(target.Name); err != nil {
+				s.toast("删除失败: " + err.Error())
+				return
+			}
+			if strings.EqualFold(s.activeGroup, target.Name) {
+				s.activeGroup = ""
+			}
+			s.reloadGroups()
+			s.openGroupsPage()
+			s.toast("已删除分组 " + target.Name)
+		}
+	})
+	s.pages.AddPage("modal-del-group", center(60, 9, m), true, true)
 }
