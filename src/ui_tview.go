@@ -50,9 +50,9 @@ func initSelectionFromConfig(sel map[string]bool, cfg StreamConfig, topKeys []st
 }
 
 type tvState struct {
-	app      *tview.Application
-	header   *tview.TextView
-	footer   *tview.TextView
+    app      *tview.Application
+    header   *tview.TextView
+    footer   *tview.TextView
 	left     *tview.List
 	right    *tview.List
 	dual     *tview.Flex
@@ -67,12 +67,13 @@ type tvState struct {
 	cfg      StreamConfig
 	topKeys  []string
 	subMap   map[string][]string
-	selected map[string]bool
-	curTop   string
-	single   bool
+    selected map[string]bool
+    curTop   string
+    single   bool
 
-	groups      []dnsGroup
-	activeGroup string
+    groups      []dnsGroup
+    activeGroup string
+    selfPubV4   string
 
 	assigned map[string]Assignment // sub -> assignment parsed from config
 
@@ -180,28 +181,59 @@ func (s *tvState) refreshAssignments() {
 }
 
 func (s *tvState) isOccupiedByOtherGroup(sub string) bool {
-	a, ok := s.assigned[sub]
-	if !ok {
-		return false
-	}
-	// occupied only when assigned by nameserver to a different group
-	return a.Method == "nameserver" && a.Ident != "" && a.Ident != s.activeGroup
+    a, ok := s.assigned[sub]
+    if !ok {
+        return false
+    }
+    // determine current target (method+ident)
+    tgt := s.targetAssignment()
+    if tgt.Ident == "" {
+        return false
+    }
+    // occupied if existing assignment does not match current target
+    if a.Method != tgt.Method {
+        return true
+    }
+    if a.Method == "nameserver" {
+        return !strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident))
+    }
+    // address: exact match
+    return strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident)
 }
 
 func (s *tvState) resetSelectionForActiveGroup() {
-	s.selected = map[string]bool{}
-	if s.activeGroup == "" {
-		return
-	}
-	// mark subs that belong to activeGroup (nameserver) as selected
-	for top, subs := range s.subMap {
-		for _, sub := range subs {
-			a, ok := s.assigned[sub]
-			if ok && a.Method == "nameserver" && a.Ident == s.activeGroup {
-				s.selected[top+"/"+sub] = true
-			}
-		}
-	}
+    s.selected = map[string]bool{}
+    // mark subs that belong to the current target (method + ident) as selected
+    tgt := s.targetAssignment()
+    if tgt.Ident == "" {
+        return
+    }
+    for top, subs := range s.subMap {
+        for _, sub := range subs {
+            a, ok := s.assigned[sub]
+            if !ok {
+                continue
+            }
+            if a.Method != tgt.Method {
+                continue
+            }
+            if a.Method == "nameserver" && strings.EqualFold(a.Ident, tgt.Ident) {
+                s.selected[top+"/"+sub] = true
+            }
+            if a.Method == "address" && a.Ident == tgt.Ident {
+                s.selected[top+"/"+sub] = true
+            }
+        }
+    }
+}
+
+// targetAssignment resolves the effective (method, ident) pair for current editing page.
+func (s *tvState) targetAssignment() Assignment {
+    ident := s.ident
+    if s.method == "nameserver" && strings.TrimSpace(ident) == "" {
+        ident = s.activeGroup
+    }
+    return Assignment{Method: s.method, Ident: strings.TrimSpace(ident)}
 }
 
 func (s *tvState) topMark(top string) string {
@@ -268,12 +300,20 @@ func (s *tvState) populateRight() {
 		sec := ""
 		if s.selected[key] {
 			mark = "[*]"
-		} else if s.isOccupiedByOtherGroup(sub) {
-			mark = "!"
-			if a, ok := s.assigned[sub]; ok {
-				sec = fmt.Sprintf("被分组 %s 占用", a.Ident)
-			}
-		}
+        } else if s.isOccupiedByOtherGroup(sub) {
+            mark = "!"
+            if a, ok := s.assigned[sub]; ok {
+                if a.Method == "nameserver" {
+                    sec = fmt.Sprintf("被分组 %s 占用", a.Ident)
+                } else if a.Method == "address" {
+                    name := a.Ident
+                    if s.selfPubV4 != "" && a.Ident == s.selfPubV4 {
+                        name = SPECIAL_UNLOCK_GROUP_NAME
+                    }
+                    sec = fmt.Sprintf("被 %s 占用", name)
+                }
+            }
+        }
 		s.right.AddItem(fmt.Sprintf("%s %s", mark, sub), sec, 0, func() {
 			if s.isOccupiedByOtherGroup(sub) {
 				return
@@ -519,24 +559,26 @@ func runTUI() {
 	}
 	topKeys, subMap := buildTopSub(cfg)
 
-	st := &tvState{
-		app:      tview.NewApplication(),
-		header:   tview.NewTextView().SetDynamicColors(true),
-		footer:   tview.NewTextView().SetDynamicColors(true),
-		left:     tview.NewList().ShowSecondaryText(false),
-		right:    tview.NewList().ShowSecondaryText(true),
-		pages:    tview.NewPages(),
-		method:   "nameserver",
-		ident:    "",
+    st := &tvState{
+        app:      tview.NewApplication(),
+        header:   tview.NewTextView().SetDynamicColors(true),
+        footer:   tview.NewTextView().SetDynamicColors(true),
+        left:     tview.NewList().ShowSecondaryText(false),
+        right:    tview.NewList().ShowSecondaryText(true),
+        pages:    tview.NewPages(),
+        method:   "nameserver",
+        ident:    "",
         sdActive: isSmartDNSActive(),
         ngActive: isNginxActive(),
         syActive: isSystemResolverActive(),
-		cfg:      cfg,
-		topKeys:  topKeys,
-		subMap:   subMap,
-		selected: map[string]bool{},
-		curTop:   "",
-	}
+        cfg:      cfg,
+        topKeys:  topKeys,
+        subMap:   subMap,
+        selected: map[string]bool{},
+        curTop:   "",
+    }
+    // try detect public IPv4 early for special unlock group
+    st.selfPubV4 = getPublicIPv4()
 	initSelectionFromConfig(st.selected, cfg, topKeys)
 	st.reloadGroups()
 
@@ -1262,37 +1304,71 @@ func (s *tvState) confirmDeleteDefaultDNS(idx int, ip string) {
 // ----- Group-first navigation -----
 
 func (s *tvState) openGroupsPage() {
-	s.activeGroup = ""
-	s.setHeader()
-	list := tview.NewList().ShowSecondaryText(false)
-	list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, U默认DNS, Q退出)")
-	s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  u 默认DNS  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
-	// refresh groups data
-	s.reloadGroups()
-	for _, g := range s.groups {
-		gg := g
-		label := fmt.Sprintf("%s (%s)", g.Name, g.IP)
-		list.AddItem(label, "", 0, func() {
-			s.activeGroup = gg.Name
-			s.ident = gg.Name
-			s.method = "nameserver"
-			s.refreshAssignments()
-			s.resetSelectionForActiveGroup()
-			// default to first top
-			if len(s.topKeys) > 0 {
-				s.curTop = s.topKeys[0]
-			}
-			// prepare config view and switch
-			s.populateLeft()
-			s.populateRight()
-			if s.single {
-				s.pages.SwitchToPage("single-top")
-			} else {
-				s.pages.SwitchToPage("dual")
-			}
-			s.setHeader()
-		})
-	}
+    s.activeGroup = ""
+    s.setHeader()
+    list := tview.NewList().ShowSecondaryText(false)
+    list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, U默认DNS, Q退出)")
+    s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  u 默认DNS  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
+    // refresh groups data
+    s.reloadGroups()
+    for _, g := range s.groups {
+        gg := g
+        label := fmt.Sprintf("%s (%s)", g.Name, g.IP)
+        list.AddItem(label, "", 0, func() {
+            s.activeGroup = gg.Name
+            s.ident = gg.Name
+            s.method = "nameserver"
+            s.refreshAssignments()
+            s.resetSelectionForActiveGroup()
+            // default to first top
+            if len(s.topKeys) > 0 {
+                s.curTop = s.topKeys[0]
+            }
+            // prepare config view and switch
+            s.populateLeft()
+            s.populateRight()
+            if s.single {
+                s.pages.SwitchToPage("single-top")
+            } else {
+                s.pages.SwitchToPage("dual")
+            }
+            s.setHeader()
+        })
+    }
+    // Append special virtual group for unlock machine
+    // Refresh public IPv4 before rendering label
+    if s.selfPubV4 == "" {
+        s.selfPubV4 = getPublicIPv4()
+    }
+    spIP := s.selfPubV4
+    if spIP == "" {
+        spIP = "(未获取公网IP，进入后可按 e 修改)"
+    }
+    spLabel := fmt.Sprintf("%s (address: %s)", SPECIAL_UNLOCK_GROUP_NAME, spIP)
+    list.AddItem(spLabel, "将所选域名解析到本机公网 IPv4", 0, func() {
+        s.activeGroup = SPECIAL_UNLOCK_GROUP_NAME
+        // refresh ip once upon enter
+        s.selfPubV4 = getPublicIPv4()
+        s.method = "address"
+        s.ident = s.selfPubV4
+        s.refreshAssignments()
+        s.resetSelectionForActiveGroup()
+        if len(s.topKeys) > 0 {
+            s.curTop = s.topKeys[0]
+        }
+        s.populateLeft()
+        s.populateRight()
+        if s.single {
+            s.pages.SwitchToPage("single-top")
+        } else {
+            s.pages.SwitchToPage("dual")
+        }
+        s.setHeader()
+        // 提示可以按 e 修改 IP
+        if s.ident == "" {
+            s.toast("未能自动获取公网 IPv4，请按 e 手动设置")
+        }
+    })
 	list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
 		if ev.Key() == tcell.KeyRune {
 			switch ev.Rune() {

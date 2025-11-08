@@ -23,6 +23,8 @@ const (
     NGINX_STREAM_DIR       = "/etc/nginx/stream.d"
     NGINX_STREAM_CONF_FILE = "/etc/nginx/stream.d/smartdns_stream.conf"
     NGINX_HTTP_CONF_FILE   = "/etc/nginx/conf.d/smartdns_http.conf"
+    // Special unlock virtual group name used in UI; method will be 'address' with server's public IPv4 as ident
+    SPECIAL_UNLOCK_GROUP_NAME = "解锁机"
 )
 
 const defaultSmartDNSConfig = `bind [::]:53

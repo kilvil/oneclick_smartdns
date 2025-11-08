@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -128,11 +129,111 @@ func httpGetTimeout(url string, timeout time.Duration) ([]byte, error) {
 }
 
 func downloadToFile(url, path string, timeout time.Duration) error {
-	b, err := httpGetTimeout(url, timeout)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o644)
+    b, err := httpGetTimeout(url, timeout)
+    if err != nil {
+        return err
+    }
+    return os.WriteFile(path, b, 0o644)
+}
+
+// isPrivateIPv4 checks RFC1918, CGNAT, loopback and link-local ranges.
+func isPrivateIPv4(ip net.IP) bool {
+    ip4 := ip.To4()
+    if ip4 == nil {
+        return true
+    }
+    a := ip4[0]
+    b := ip4[1]
+    // 10.0.0.0/8
+    if a == 10 {
+        return true
+    }
+    // 172.16.0.0/12
+    if a == 172 && b >= 16 && b <= 31 {
+        return true
+    }
+    // 192.168.0.0/16
+    if a == 192 && b == 168 {
+        return true
+    }
+    // 100.64.0.0/10 (CGNAT)
+    if a == 100 && b >= 64 && b <= 127 {
+        return true
+    }
+    // 127.0.0.0/8 loopback
+    if a == 127 {
+        return true
+    }
+    // 169.254.0.0/16 link-local
+    if a == 169 && b == 254 {
+        return true
+    }
+    return false
+}
+
+func firstPublicIPv4FromInterfaces() string {
+    ifaces, _ := net.Interfaces()
+    for _, iface := range ifaces {
+        if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+            continue
+        }
+        addrs, _ := iface.Addrs()
+        for _, a := range addrs {
+            var ip net.IP
+            switch v := a.(type) {
+            case *net.IPNet:
+                ip = v.IP
+            case *net.IPAddr:
+                ip = v.IP
+            }
+            if ip == nil {
+                continue
+            }
+            ip4 := ip.To4()
+            if ip4 == nil {
+                continue
+            }
+            if !isPrivateIPv4(ip4) {
+                return ip4.String()
+            }
+        }
+    }
+    return ""
+}
+
+// getPublicIPv4 tries multiple strategies to obtain the server's public IPv4.
+// Order: env override -> OpenDNS dig -> ipify -> ifconfig.co -> interface guess.
+func getPublicIPv4() string {
+    if v := strings.TrimSpace(os.Getenv("SMARTDNS_SELF_PUBLIC_IPV4")); v != "" {
+        if net.ParseIP(v) != nil {
+            return v
+        }
+    }
+    // OpenDNS via dig (if available)
+    if _, err := exec.LookPath("dig"); err == nil {
+        if out, err := runCmdCapture("sh", "-lc", "dig +short -4 myip.opendns.com @resolver1.opendns.com 2>/dev/null | head -n1"); err == nil {
+            ip := strings.TrimSpace(out)
+            if net.ParseIP(ip) != nil {
+                return ip
+            }
+        }
+    }
+    // ipify.org
+    if b, err := httpGetTimeout("https://api.ipify.org", 4*time.Second); err == nil {
+        ip := strings.TrimSpace(string(b))
+        if net.ParseIP(ip) != nil {
+            return ip
+        }
+    }
+    // ifconfig.co
+    if b, err := httpGetTimeout("https://ifconfig.co/ip", 4*time.Second); err == nil {
+        ip := strings.TrimSpace(string(b))
+        if net.ParseIP(ip) != nil {
+            return ip
+        }
+    }
+    // Guess from interfaces
+    return firstPublicIPv4FromInterfaces()
 }
 
 func readLines(path string) ([]string, error) {
