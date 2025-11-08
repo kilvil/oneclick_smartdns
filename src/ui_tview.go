@@ -413,6 +413,17 @@ func center(w, h int, p tview.Primitive) tview.Primitive {
 	return grid
 }
 
+// runOutsideUI temporarily suspends the TUI, executes task, then resumes.
+func (s *tvState) runOutsideUI(desc string, task func()) {
+	s.app.Suspend(func() {
+		if desc != "" {
+			fmt.Printf("\n[执行] %s...\n\n", desc)
+		}
+		task()
+		fmt.Println("\n[完成] 操作结束，正在恢复界面...")
+	})
+}
+
 func (s *tvState) openConfigViewer(title, path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -793,7 +804,7 @@ func (s *tvState) openSmartDNSActions() {
 	list.SetBorder(true).SetTitle("SmartDNS")
 	list.AddItem("安装", "从发布包安装", 0, func() {
 		s.pages.RemovePage("modal")
-		installSmartDNS()
+		s.runOutsideUI("安装 SmartDNS", installSmartDNS)
 		s.flushUI()
 		s.toast("SmartDNS 安装完成，界面已刷新")
 	})
@@ -832,7 +843,7 @@ func (s *tvState) confirmUninstallSmartDNS() {
 	m := tview.NewModal().SetText("确认卸载 SmartDNS？\n将移除服务与二进制，保留 /etc/smartdns 配置。").AddButtons([]string{"确定", "取消"}).SetDoneFunc(func(i int, l string) {
 		s.pages.RemovePage("modal")
 		if i == 0 {
-			uninstallSmartDNS()
+			s.runOutsideUI("卸载 SmartDNS", uninstallSmartDNS)
 			s.flushUI()
 			s.toast("已卸载 SmartDNS（配置保留），界面已刷新")
 		}
@@ -845,7 +856,7 @@ func (s *tvState) openSniproxyActions() {
 	list.SetBorder(true).SetTitle("sniproxy")
 	list.AddItem("安装", "通过 apt 安装", 0, func() {
 		s.pages.RemovePage("modal")
-		installSniproxy()
+		s.runOutsideUI("安装 sniproxy", installSniproxy)
 		s.flushUI()
 		s.toast("sniproxy 安装完成，界面已刷新")
 	})
