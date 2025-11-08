@@ -1099,9 +1099,9 @@ func (s *tvState) openNginxActions() {
             } else {
                 if err := nginxTestAndReload(append); err != nil {
                     append("[失败] nginx -t 或重载失败: " + err.Error())
-                } else {
-                    append("[完成] Nginx 配置已生效")
-                }
+                    } else {
+                        append("[完成] Nginx 配置已生效")
+                    }
             }
             s.flushUI()
         }()
