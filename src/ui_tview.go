@@ -452,6 +452,28 @@ func (s *tvState) openConfigViewer(title, path string) {
 	s.app.SetFocus(view)
 }
 
+// openLogModal creates a modal TextView to stream logs into.
+func (s *tvState) openLogModal(title string) *tview.TextView {
+	view := tview.NewTextView()
+	view.SetScrollable(true).SetWrap(false).SetDynamicColors(true)
+	view.SetBorder(true).SetTitle(title + " (Esc/q 关闭)")
+	view.SetTitleAlign(tview.AlignLeft)
+	view.SetChangedFunc(func() { s.app.Draw() })
+	view.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyEsc || ev.Rune() == 'q' {
+			s.pages.RemovePage("modal-log")
+			return nil
+		}
+		return ev
+	})
+	if s.pages.HasPage("modal-log") {
+		s.pages.RemovePage("modal-log")
+	}
+	s.pages.AddPage("modal-log", center(100, 30, view), true, true)
+	s.app.SetFocus(view)
+	return view
+}
+
 // flushUI refreshes runtime states and re-renders current page safely.
 func (s *tvState) flushUI() {
 	s.app.QueueUpdateDraw(func() {
@@ -804,9 +826,18 @@ func (s *tvState) openSmartDNSActions() {
 	list.SetBorder(true).SetTitle("SmartDNS")
 	list.AddItem("安装", "从发布包安装", 0, func() {
 		s.pages.RemovePage("modal")
-		s.runOutsideUI("安装 SmartDNS", installSmartDNS)
-		s.flushUI()
-		s.toast("SmartDNS 安装完成，界面已刷新")
+		logView := s.openLogModal("安装 SmartDNS")
+		go func() {
+			append := func(line string) {
+				s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) })
+			}
+			if err := installSmartDNSStream(append); err != nil {
+				append("[失败] " + err.Error())
+			} else {
+				append("[完成] SmartDNS 安装成功")
+			}
+			s.flushUI()
+		}()
 	})
 	list.AddItem("卸载", "移除服务与二进制（保留配置）", 0, func() {
 		s.pages.RemovePage("modal")
@@ -856,9 +887,18 @@ func (s *tvState) openSniproxyActions() {
 	list.SetBorder(true).SetTitle("sniproxy")
 	list.AddItem("安装", "通过 apt 安装", 0, func() {
 		s.pages.RemovePage("modal")
-		s.runOutsideUI("安装 sniproxy", installSniproxy)
-		s.flushUI()
-		s.toast("sniproxy 安装完成，界面已刷新")
+		logView := s.openLogModal("安装 sniproxy")
+		go func() {
+			append := func(line string) {
+				s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) })
+			}
+			if err := installSniproxyStream(append); err != nil {
+				append("[失败] " + err.Error())
+			} else {
+				append("[完成] sniproxy 安装成功")
+			}
+			s.flushUI()
+		}()
 	})
 	list.AddItem("启动", "", 0, func() {
 		s.pages.RemovePage("modal")

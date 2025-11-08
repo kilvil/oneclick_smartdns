@@ -1,23 +1,23 @@
 package src
 
 const (
-    RESET  = "\033[0m"
-    BLUE   = "\033[1;34m"
-    GREEN  = "\033[1;32m"
-    RED    = "\033[1;31m"
-    YELLOW = "\033[1;33m"
-    CYAN   = "\033[1;36m"
+	RESET  = "\033[0m"
+	BLUE   = "\033[1;34m"
+	GREEN  = "\033[1;32m"
+	RED    = "\033[1;31m"
+	YELLOW = "\033[1;33m"
+	CYAN   = "\033[1;36m"
 )
 
 const (
-    SCRIPT_VERSION                    = "GO_V1.0.0"
-    REMOTE_SCRIPT_URL                 = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/smartdns_install.sh"
-    REMOTE_STREAM_CONFIG_FILE_URL     = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/StreamConfig.yaml"
-    REMOTE_SMARTDNS_URL               = "https://github.com/pymumu/smartdns/releases/download/Release46/smartdns.1.2024.06.12-2222.x86-linux-all.tar.gz"
-    REMOTE_RegionRestrictionCheck_URL = "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/check.sh"
+	SCRIPT_VERSION                    = "GO_V1.0.0"
+	REMOTE_SCRIPT_URL                 = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/smartdns_install.sh"
+	REMOTE_STREAM_CONFIG_FILE_URL     = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/StreamConfig.yaml"
+	REMOTE_SMARTDNS_URL               = "https://github.com/pymumu/smartdns/releases/download/Release46/smartdns.1.2024.06.12-2222.x86-linux-all.tar.gz"
+	REMOTE_RegionRestrictionCheck_URL = "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/check.sh"
 
-    SMART_CONFIG_FILE = "/etc/smartdns/smartdns.conf"
-    SNIPROXY_CONFIG   = "/etc/sniproxy.conf"
+	SMART_CONFIG_FILE = "/etc/smartdns/smartdns.conf"
+	SNIPROXY_CONFIG   = "/etc/sniproxy.conf"
 )
 
 const defaultSmartDNSConfig = `bind [::]:53
