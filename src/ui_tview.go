@@ -15,9 +15,9 @@ func isSmartDNSActive() bool {
 	return strings.TrimSpace(out) == "active"
 }
 
-func isSniproxyActive() bool {
-	out, _ := runCmdCapture("systemctl", "is-active", "sniproxy")
-	return strings.TrimSpace(out) == "active"
+func isNginxActive() bool {
+    out, _ := runCmdCapture("systemctl", "is-active", "nginx")
+    return strings.TrimSpace(out) == "active"
 }
 
 func isSystemResolverActive() bool {
@@ -62,7 +62,7 @@ type tvState struct {
 	method   string
 	ident    string
 	sdActive bool
-	snActive bool
+    ngActive bool
 	syActive bool
 	cfg      StreamConfig
 	topKeys  []string
@@ -146,10 +146,10 @@ func (s *tvState) headerText() string {
 	if s.sdActive {
 		sd = "SmartDNS: [green]运行中[-]"
 	}
-	sni := "sniproxy: [red]未运行[-]"
-	if s.snActive {
-		sni = "sniproxy: [green]运行中[-]"
-	}
+    ngx := "nginx: [red]未运行[-]"
+    if s.ngActive {
+        ngx = "nginx: [green]运行中[-]"
+    }
 	sy := "systemd-resolved: [green]运行中[-]"
 	if !s.syActive {
 		sy = "systemd-resolved: [gray]已停用[-]"
@@ -161,7 +161,7 @@ func (s *tvState) headerText() string {
 	if s.activeGroup != "" {
 		grp = "组: [green]" + s.activeGroup + "[-]"
 	}
-	return fmt.Sprintf(" %s  |  %s  |  %s  |  %s  |  %s  |  %s", way, dns, sd, sni, sy, grp)
+    return fmt.Sprintf(" %s  |  %s  |  %s  |  %s  |  %s  |  %s", way, dns, sd, ngx, sy, grp)
 }
 
 func (s *tvState) setHeader() { s.header.SetDynamicColors(true).SetText(s.headerText()) }
@@ -368,8 +368,8 @@ func (s *tvState) saveSelectionSilent() (int, error) {
 			return 0, fmt.Errorf("请设置组名或IP (e)")
 		}
 	}
-	count := 0
-	snSync := fileExists(SNIPROXY_CONFIG)
+    count := 0
+    ngReady := fileExists(NGINX_MAIN_CONF)
 	for key, on := range s.selected {
 		if !on {
 			continue
@@ -386,13 +386,16 @@ func (s *tvState) saveSelectionSilent() (int, error) {
 		}
 		_ = deletePlatformRules(sub)
 		_ = addDomainRules(s.method, domains, s.ident, sub)
-		if snSync {
-			if err := syncSubToSniproxy(s.cfg, top, sub); err != nil {
-				logYellow("同步 sniproxy 失败: " + err.Error())
-			}
-		}
-		count++
-	}
+        count++
+    }
+    // Ensure nginx proxy configs exist and reload nginx (if installed)
+    if ngReady {
+        if err := ensureNginxProxyConfigs(func(s string){ /* no-op in silent save */ }); err != nil {
+            logYellow("写入 Nginx 代理配置失败: " + err.Error())
+        } else {
+            _ = nginxTestAndReload(func(string){})
+        }
+    }
 	if count > 0 {
 		s.refreshAssignments()
 		s.resetSelectionForActiveGroup()
@@ -476,11 +479,11 @@ func (s *tvState) openLogModal(title string) *tview.TextView {
 
 // flushUI refreshes runtime states and re-renders current page safely.
 func (s *tvState) flushUI() {
-	s.app.QueueUpdateDraw(func() {
-		// refresh runtime/service states
-		s.sdActive = isSmartDNSActive()
-		s.snActive = isSniproxyActive()
-		s.syActive = isSystemResolverActive()
+    s.app.QueueUpdateDraw(func() {
+        // refresh runtime/service states
+        s.sdActive = isSmartDNSActive()
+        s.ngActive = isNginxActive()
+        s.syActive = isSystemResolverActive()
 		// reload groups and assignments as files may have changed after install/uninstall
 		s.reloadGroups()
 		s.refreshAssignments()
@@ -525,9 +528,9 @@ func runTUI() {
 		pages:    tview.NewPages(),
 		method:   "nameserver",
 		ident:    "",
-		sdActive: isSmartDNSActive(),
-		snActive: isSniproxyActive(),
-		syActive: isSystemResolverActive(),
+        sdActive: isSmartDNSActive(),
+        ngActive: isNginxActive(),
+        syActive: isSystemResolverActive(),
 		cfg:      cfg,
 		topKeys:  topKeys,
 		subMap:   subMap,
@@ -813,7 +816,7 @@ func runTUI() {
 	}
 }
 
-// ----- Service Manager (SmartDNS / sniproxy) -----
+// ----- Service Manager (SmartDNS / Nginx) -----
 
 func (s *tvState) openServiceManager() {
 	options := tview.NewList().ShowSecondaryText(false)
@@ -822,8 +825,8 @@ func (s *tvState) openServiceManager() {
 		s.pages.RemovePage("modal")
 		s.confirmEmergencyResetDNS()
 	})
-	options.AddItem("SmartDNS", "安装/卸载/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSmartDNSActions() })
-	options.AddItem("sniproxy", "安装/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSniproxyActions() })
+    options.AddItem("SmartDNS", "安装/卸载/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSmartDNSActions() })
+    options.AddItem("Nginx", "安装/启动/停止/重载/查看配置", 0, func() { s.pages.RemovePage("modal"); s.openNginxActions() })
 	options.AddItem("关闭", "", 0, func() { s.pages.RemovePage("modal") })
 	s.pages.AddPage("modal", center(50, 12, options), true, true)
 }
@@ -937,75 +940,80 @@ func (s *tvState) confirmUninstallSmartDNS() {
 	s.pages.AddPage("modal", center(60, 8, m), true, true)
 }
 
-func (s *tvState) openSniproxyActions() {
-	list := tview.NewList().ShowSecondaryText(false)
-	list.SetBorder(true).SetTitle("sniproxy")
-	list.AddItem("安装", "通过 apt 安装", 0, func() {
-		s.pages.RemovePage("modal")
-		logView := s.openLogModal("安装 sniproxy")
-		go func() {
-			append := func(line string) {
-				s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) })
-			}
-			if err := installSniproxyStream(append); err != nil {
-				append("[失败] " + err.Error())
-			} else {
-				append("[完成] sniproxy 安装成功")
-			}
-			s.flushUI()
-		}()
-	})
-	list.AddItem("启动", "", 0, func() {
-		s.pages.RemovePage("modal")
-		logView := s.openLogModal("启动 sniproxy")
-		go func() {
-			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-			append("写入 systemd drop-in，指定 -c /etc/sniproxy.conf ...")
-			if err := ensureSniproxyOverride(); err != nil {
-				append("[警告] 写入 drop-in 失败: " + err.Error())
-			}
-			append("启动 sniproxy ...")
-			_ = runCmdPipe(append, "systemctl", "start", "sniproxy")
-			append("启用 sniproxy 开机自启 ...")
-			_ = runCmdPipe(append, "systemctl", "enable", "sniproxy")
-			append("完成: sniproxy 已启动")
-			s.flushUI()
-		}()
-	})
-	list.AddItem("停止", "", 0, func() {
-		s.pages.RemovePage("modal")
-		logView := s.openLogModal("停止 sniproxy")
-		go func() {
-			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-			append("停止 sniproxy ...")
-			_ = runCmdPipe(append, "systemctl", "stop", "sniproxy")
-			append("禁用 sniproxy 开机自启 ...")
-			_ = runCmdPipe(append, "systemctl", "disable", "sniproxy")
-			append("完成: sniproxy 已停止")
-			s.flushUI()
-		}()
-	})
-	list.AddItem("重启", "", 0, func() {
-		s.pages.RemovePage("modal")
-		logView := s.openLogModal("重启 sniproxy")
-		go func() {
-			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-			append("写入 systemd drop-in，指定 -c /etc/sniproxy.conf ...")
-			if err := ensureSniproxyOverride(); err != nil {
-				append("[警告] 写入 drop-in 失败: " + err.Error())
-			}
-			append("重启 sniproxy ...")
-			_ = runCmdPipe(append, "systemctl", "restart", "sniproxy")
-			append("完成: sniproxy 已重启")
-			s.flushUI()
-		}()
-	})
-	list.AddItem("查看配置", SNIPROXY_CONFIG, 0, func() {
-		s.pages.RemovePage("modal")
-		s.openConfigViewer("sniproxy 配置", SNIPROXY_CONFIG)
-	})
-	list.AddItem("返回", "", 0, func() { s.pages.RemovePage("modal"); s.openServiceManager() })
-	s.pages.AddPage("modal", center(50, 12, list), true, true)
+func (s *tvState) openNginxActions() {
+    list := tview.NewList().ShowSecondaryText(false)
+    list.SetBorder(true).SetTitle("Nginx")
+    list.AddItem("安装", "通过 apt 安装 nginx 并启用", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("安装 Nginx")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            if err := installNginxStream(append); err != nil {
+                append("[失败] " + err.Error())
+            } else {
+                append("[完成] Nginx 安装成功")
+            }
+            s.flushUI()
+        }()
+    })
+    list.AddItem("写入/刷新代理配置并重载", "为 80/443 写入反向代理并 nginx -t && reload", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("写入 Nginx 配置并重载")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            if err := ensureNginxProxyConfigs(append); err != nil {
+                append("[失败] " + err.Error())
+            } else {
+                if err := nginxTestAndReload(append); err != nil {
+                    append("[失败] nginx -t 或重载失败: " + err.Error())
+                } else {
+                    append("[完成] Nginx 配置已生效")
+                }
+            }
+            s.flushUI()
+        }()
+    })
+    list.AddItem("启动", "", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("启动 Nginx")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            _ = runCmdPipe(append, "systemctl", "start", "nginx")
+            s.flushUI()
+        }()
+    })
+    list.AddItem("停止", "", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("停止 Nginx")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            _ = runCmdPipe(append, "systemctl", "stop", "nginx")
+            s.flushUI()
+        }()
+    })
+    list.AddItem("重启", "", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("重启 Nginx")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            _ = runCmdPipe(append, "systemctl", "restart", "nginx")
+            s.flushUI()
+        }()
+    })
+    list.AddItem("查看 nginx.conf", NGINX_MAIN_CONF, 0, func() {
+        s.pages.RemovePage("modal")
+        s.openConfigViewer("nginx.conf", NGINX_MAIN_CONF)
+    })
+    list.AddItem("查看 stream 配置", NGINX_STREAM_CONF_FILE, 0, func() {
+        s.pages.RemovePage("modal")
+        s.openConfigViewer("stream 配置", NGINX_STREAM_CONF_FILE)
+    })
+    list.AddItem("查看 http 配置", NGINX_HTTP_CONF_FILE, 0, func() {
+        s.pages.RemovePage("modal")
+        s.openConfigViewer("http 配置", NGINX_HTTP_CONF_FILE)
+    })
+    list.AddItem("返回", "", 0, func() { s.pages.RemovePage("modal"); s.openServiceManager() })
+    s.pages.AddPage("modal", center(60, 16, list), true, true)
 }
 
 // ----- Upstream group management -----

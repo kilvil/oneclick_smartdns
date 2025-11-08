@@ -46,17 +46,14 @@ func stopService(service string) {
 
 func checkSmartDNSStatus()  { checkServiceStatus("smartdns", "SmartDNS") }
 func checkSystemDNSStatus() { checkServiceStatus("systemd-resolved", "系统 DNS") }
-func checkSniproxyStatus()  { checkServiceStatus("sniproxy", "sniproxy") }
+// (sniproxy 已弃用)
 
 func restoreSystemDNS() {
 	stopService("smartdns")
 	restoreService("systemd-resolved")
 	logGreen("系统 DNS 服务已启动并设置为开机启动。")
 }
-func restoreSniproxy() {
-	restoreService("sniproxy")
-	logGreen("sniproxy 服务已启动并设置为开机启动。")
-}
+// (sniproxy 已弃用)
 
 func startSmartDNS() {
 	stopService("systemd-resolved")
@@ -72,32 +69,13 @@ func stopSmartDNS() {
 	stopService("smartdns")
 	logGreen("SmartDNS 服务已停止并关闭开机自启。")
 }
-func stopSniproxy() {
-	stopService("sniproxy")
-	logGreen("sniproxy 服务已停止并关闭开机自启。")
-}
+// (sniproxy 已弃用)
 
 func restartService(service string) { _ = manageService(service, "restart", "重启") }
 func restartSmartDNS()              { restartService("smartdns") }
-func restartSniproxy()              { restartService("sniproxy") }
+// (sniproxy 已弃用)
 
-// ensureSniproxyOverride ensures systemd drop-in sets explicit config path for sniproxy.
-// Some distributions ship a unit with ExecStart="/usr/sbin/sniproxy -f" only,
-// which may fail to auto-detect config or makes debugging harder. We create a
-// drop-in to make it explicit: -c /etc/sniproxy.conf
-func ensureSniproxyOverride() error {
-    dir := "/etc/systemd/system/sniproxy.service.d"
-    if err := os.MkdirAll(dir, 0o755); err != nil {
-        return err
-    }
-    content := "[Service]\nExecStart=\nExecStart=/usr/sbin/sniproxy -f -c /etc/sniproxy.conf\n"
-    if err := os.WriteFile(dir+"/override.conf", []byte(content), 0o644); err != nil {
-        return err
-    }
-    // reload daemon to apply drop-in
-    _, _ = runCmdCapture("systemctl", "daemon-reload")
-    return nil
-}
+// (sniproxy 已弃用)
 
 // emergencyResetDNS stops smartdns and systemd-resolved, then writes resolv.conf to 8.8.8.8
 // This helps recover networking when DNS is misconfigured.

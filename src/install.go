@@ -1,46 +1,18 @@
 package src
 
 import (
-	"archive/tar"
-	"compress/gzip"
-	"errors"
-	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"time"
+    "archive/tar"
+    "compress/gzip"
+    "errors"
+    "fmt"
+    "io"
+    "io/fs"
+    "os"
+    "path/filepath"
+    "time"
 )
 
-func installSniproxy() {
-    logBlue("安装 sniproxy...")
-    _ = installSniproxyStream(func(s string) { fmt.Println(s) })
-}
-
-// Streaming, non-interactive installer for sniproxy. All outputs are sent to log.
-func installSniproxyStream(log func(string)) error {
-    if log == nil {
-        log = func(string) {}
-    }
-    log("执行: apt-get update")
-    if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "update"); err != nil {
-        return err
-    }
-    log("执行: apt-get install -y sniproxy")
-    if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "install", "-y", "sniproxy"); err != nil {
-        return err
-    }
-    // 写入 drop-in，显式指定配置路径
-    log("写入 systemd drop-in (-c /etc/sniproxy.conf)")
-    if err := ensureSniproxyOverride(); err != nil {
-        log("[警告] 写入 drop-in 失败: " + err.Error())
-    }
-    log("启动并设置开机自启 sniproxy")
-    _ = runCmdPipe(func(s string) { log(s) }, "systemctl", "start", "sniproxy")
-    _ = runCmdPipe(func(s string) { log(s) }, "systemctl", "enable", "sniproxy")
-    log("sniproxy 安装完成")
-    return nil
-}
+// (sniproxy 已弃用)
 
 func extractTarGz(srcPath, dstDir string) error {
 	f, err := os.Open(srcPath)

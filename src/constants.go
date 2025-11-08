@@ -10,15 +10,19 @@ const (
 )
 
 const (
-	SCRIPT_VERSION                    = "GO_V1.0.0"
-	REMOTE_SCRIPT_URL                 = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/smartdns_install.sh"
-	REMOTE_STREAM_CONFIG_FILE_URL     = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/StreamConfig.yaml"
-	REMOTE_SMARTDNS_URL               = "https://github.com/pymumu/smartdns/releases/download/Release46/smartdns.1.2024.06.12-2222.x86-linux-all.tar.gz"
-	REMOTE_RegionRestrictionCheck_URL = "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/check.sh"
-	REMOTE_SNIPROXY_INSTALLER_URL     = "https://raw.githubusercontent.com/kilvil/dnsmasq_sniproxy_install/master/dnsmasq_sniproxy.sh"
+    SCRIPT_VERSION                    = "GO_V1.0.0"
+    REMOTE_SCRIPT_URL                 = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/smartdns_install.sh"
+    REMOTE_STREAM_CONFIG_FILE_URL     = "https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/StreamConfig.yaml"
+    REMOTE_SMARTDNS_URL               = "https://github.com/pymumu/smartdns/releases/download/Release46/smartdns.1.2024.06.12-2222.x86-linux-all.tar.gz"
+    REMOTE_RegionRestrictionCheck_URL = "https://raw.githubusercontent.com/1-stream/RegionRestrictionCheck/main/check.sh"
 
-	SMART_CONFIG_FILE = "/etc/smartdns/smartdns.conf"
-	SNIPROXY_CONFIG   = "/etc/sniproxy.conf"
+    SMART_CONFIG_FILE = "/etc/smartdns/smartdns.conf"
+
+    // Nginx related paths (replacing sniproxy)
+    NGINX_MAIN_CONF        = "/etc/nginx/nginx.conf"
+    NGINX_STREAM_DIR       = "/etc/nginx/stream.d"
+    NGINX_STREAM_CONF_FILE = "/etc/nginx/stream.d/smartdns_stream.conf"
+    NGINX_HTTP_CONF_FILE   = "/etc/nginx/conf.d/smartdns_http.conf"
 )
 
 const defaultSmartDNSConfig = `bind [::]:53
