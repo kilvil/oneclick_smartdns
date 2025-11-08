@@ -55,11 +55,11 @@ func restoreSystemDNS() {
 }
 // (sniproxy 已弃用)
 
+// startSmartDNS only ensures the smartdns service is enabled and started.
+// It does NOT modify system resolver or /etc/resolv.conf; use explicit actions in UI instead.
 func startSmartDNS() {
-	stopService("systemd-resolved")
-	restoreService("smartdns")
-	modifyResolv("127.0.0.1")
-	logGreen("SmartDNS 服务已启动并设置为开机启动！")
+    restoreService("smartdns")
+    logGreen("SmartDNS 服务已启动并设置为开机启动（未修改系统 DNS）。")
 }
 func stopSystemDNS() {
 	stopService("systemd-resolved")

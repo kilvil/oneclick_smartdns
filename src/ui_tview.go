@@ -861,16 +861,44 @@ func runTUI() {
 // ----- Service Manager (SmartDNS / Nginx) -----
 
 func (s *tvState) openServiceManager() {
-	options := tview.NewList().ShowSecondaryText(false)
-	options.SetBorder(true).SetTitle("服务管理")
-	options.AddItem("紧急重置 DNS -> 8.8.8.8", "停止 smartdns/systemd-resolved 并覆盖 /etc/resolv.conf", 0, func() {
-		s.pages.RemovePage("modal")
-		s.confirmEmergencyResetDNS()
-	})
+    options := tview.NewList().ShowSecondaryText(false)
+    options.SetBorder(true).SetTitle("服务管理")
+    options.AddItem("紧急重置 DNS -> 8.8.8.8", "停止 smartdns/systemd-resolved 并覆盖 /etc/resolv.conf", 0, func() {
+        s.pages.RemovePage("modal")
+        s.confirmEmergencyResetDNS()
+    })
+    options.AddItem("覆盖系统 DNS -> 127.0.0.1", "停用 systemd-resolved 并写入 /etc/resolv.conf", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("覆盖系统 DNS -> 127.0.0.1")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            append("停止 systemd-resolved ...")
+            _ = runCmdPipe(append, "systemctl", "stop", "systemd-resolved")
+            append("禁用 systemd-resolved 开机自启 ...")
+            _ = runCmdPipe(append, "systemctl", "disable", "systemd-resolved")
+            append("写入 /etc/resolv.conf -> 127.0.0.1 ...")
+            modifyResolv("127.0.0.1")
+            append("完成: 已将系统 DNS 覆盖为 127.0.0.1")
+            s.flushUI()
+        }()
+    })
+    options.AddItem("恢复系统 DNS（systemd-resolved）", "启用并启动 systemd-resolved", 0, func() {
+        s.pages.RemovePage("modal")
+        logView := s.openLogModal("恢复系统 DNS")
+        go func() {
+            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+            append("启用 systemd-resolved 开机自启 ...")
+            _ = runCmdPipe(append, "systemctl", "enable", "systemd-resolved")
+            append("启动 systemd-resolved ...")
+            _ = runCmdPipe(append, "systemctl", "start", "systemd-resolved")
+            append("完成: 已恢复系统 DNS（/etc/resolv.conf 可能由 resolved 接管）")
+            s.flushUI()
+        }()
+    })
     options.AddItem("SmartDNS", "安装/卸载/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSmartDNSActions() })
     options.AddItem("Nginx", "安装/启动/停止/重载/查看配置", 0, func() { s.pages.RemovePage("modal"); s.openNginxActions() })
-	options.AddItem("关闭", "", 0, func() { s.pages.RemovePage("modal") })
-	s.pages.AddPage("modal", center(50, 12, options), true, true)
+    options.AddItem("关闭", "", 0, func() { s.pages.RemovePage("modal") })
+    s.pages.AddPage("modal", center(50, 12, options), true, true)
 }
 
 func (s *tvState) confirmEmergencyResetDNS() {
@@ -924,17 +952,11 @@ func (s *tvState) openSmartDNSActions() {
 		logView := s.openLogModal("启动 SmartDNS")
 		go func() {
 			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-			append("停止 systemd-resolved ...")
-			_ = runCmdPipe(append, "systemctl", "stop", "systemd-resolved")
-			append("禁用 systemd-resolved 开机自启 ...")
-			_ = runCmdPipe(append, "systemctl", "disable", "systemd-resolved")
 			append("启动 smartdns ...")
 			_ = runCmdPipe(append, "systemctl", "start", "smartdns")
 			append("启用 smartdns 开机自启 ...")
 			_ = runCmdPipe(append, "systemctl", "enable", "smartdns")
-			append("写入 /etc/resolv.conf -> 127.0.0.1 ...")
-			modifyResolv("127.0.0.1")
-			append("完成: SmartDNS 已启动")
+			append("完成: SmartDNS 已启动（未覆盖系统 DNS）")
 			s.flushUI()
 		}()
 	})
