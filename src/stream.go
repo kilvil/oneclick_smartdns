@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -406,53 +405,126 @@ func syncSubToSniproxy(cfg StreamConfig, top, sub string) error {
 	if !ok {
 		return fmt.Errorf("未找到二级平台 %s/%s", top, sub)
 	}
-	for _, d := range domains {
-		d = strings.TrimSpace(d)
-		if d == "" {
-			continue
-		}
-		if err := addDomainToSniproxyTable(d); err != nil {
-			return err
-		}
-	}
-	return nil
+    // 合并一次性写入，避免重复重写
+    return addDomainsToSniproxyTables(domains)
 }
 
-// sniproxy table injection helper
-func addDomainToSniproxyTable(domain string) error {
-	if !fileExists(SNIPROXY_CONFIG) {
-		return fmt.Errorf("sniproxy 配置文件未找到: %s", SNIPROXY_CONFIG)
-	}
-	lines, err := readLines(SNIPROXY_CONFIG)
-	if err != nil {
-		return err
-	}
-	hasTable := -1
-	for i, l := range lines {
-		if strings.TrimSpace(l) == "table {" {
-			hasTable = i
-			break
-		}
-	}
-	if hasTable == -1 {
-		return fmt.Errorf("sniproxy 配置文件中的 table 块未找到")
-	}
-	for _, l := range lines {
-		if strings.Contains(l, domain) && strings.HasPrefix(strings.TrimSpace(l), ".*") {
-			return nil
-		}
-	}
-	insert := "    .*" + regexp.QuoteMeta(domain) + " *"
-	// present config uses raw domain without QuoteMeta while matching; keep consistent with original behavior
-	insert = "    .*" + domain + " *"
-	newLines := append([]string{}, lines[:hasTable+1]...)
-	newLines = append(newLines, insert)
-	newLines = append(newLines, lines[hasTable+1:]...)
-	if err := writeLines(SNIPROXY_CONFIG, newLines); err != nil {
-		return err
-	}
-	logGreen("已添加域名：" + domain + " 到 table 块内")
-	return nil
+// sniproxy table injection helpers (write into named tables http_hosts / https_hosts)
+// Ensure only one block exists for each named table; merge and dedupe entries; ignore sample lines.
+func addDomainToSniproxyTable(domain string) error { return addDomainsToSniproxyTables([]string{domain}) }
+
+func addDomainsToSniproxyTables(domains []string) error {
+    if !fileExists(SNIPROXY_CONFIG) {
+        return fmt.Errorf("sniproxy 配置文件未找到: %s", SNIPROXY_CONFIG)
+    }
+    lines, err := readLines(SNIPROXY_CONFIG)
+    if err != nil {
+        return err
+    }
+
+    // Build normalized set from input
+    norm := func(d string) string {
+        d = strings.TrimSpace(d)
+        if d == "" { return "" }
+        // keep consistent with existing behavior: raw domain, prefix .* and suffix *
+        return ".*" + d + " *"
+    }
+    addSet := map[string]struct{}{}
+    addOrder := []string{}
+    for _, d := range domains {
+        n := norm(d)
+        if n == "" { continue }
+        if _, ok := addSet[n]; !ok {
+            addSet[n] = struct{}{}
+            addOrder = append(addOrder, n)
+        }
+    }
+
+    updateTable := func(name string, lines []string) ([]string, error) {
+        // Collect existing managed lines from all same-named table blocks, then remove them
+        var out []string
+        out = make([]string, 0, len(lines))
+        existing := []string{}
+        // helper to test if a line is our managed pattern entry
+        isManaged := func(t string) bool {
+            t = strings.TrimSpace(t)
+            // managed pattern style: ".*<domain> *"
+            return strings.HasPrefix(t, ".*") && strings.HasSuffix(t, " *")
+        }
+        in := false
+        depth := 0
+        for i := 0; i < len(lines); i++ {
+            t := strings.TrimSpace(lines[i])
+            if !in {
+                if strings.HasPrefix(t, "table "+name) && strings.Contains(t, "{") {
+                    // enter block, skip writing header now (we'll reconstruct later)
+                    in = true
+                    depth = 0
+                    // count braces on same line
+                    brace := strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+                    depth += brace
+                    if depth <= 0 {
+                        // single-line malformed block; skip it entirely
+                        in = false
+                    }
+                    continue
+                }
+                out = append(out, lines[i])
+                continue
+            }
+            // inside target table block; accumulate managed entries, skip all until we close this block
+            tt := strings.TrimSpace(lines[i])
+            if isManaged(tt) {
+                existing = append(existing, tt)
+            }
+            // track depth to find end
+            brace := strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+            depth += brace
+            if depth <= 0 {
+                // end of this table block
+                in = false
+            }
+            // do not copy original lines
+        }
+
+        // Deduplicate while preserving existing order, then append new ones
+        seen := map[string]struct{}{}
+        merged := []string{}
+        for _, e := range existing {
+            if _, ok := seen[e]; ok { continue }
+            seen[e] = struct{}{}
+            merged = append(merged, e)
+        }
+        for _, e := range addOrder {
+            if _, ok := seen[e]; ok { continue }
+            seen[e] = struct{}{}
+            merged = append(merged, e)
+        }
+
+        // Reconstruct single canonical block and append to end of file
+        block := []string{"table "+name+" {"}
+        for _, m := range merged {
+            block = append(block, "    "+m)
+        }
+        block = append(block, "}")
+        // ensure file ends with a newline before appending a block for readability
+        if len(out) > 0 && strings.TrimSpace(out[len(out)-1]) != "" {
+            out = append(out, "")
+        }
+        out = append(out, block...)
+        return out, nil
+    }
+
+    // Update http_hosts then https_hosts sequentially
+    nl, err := updateTable("http_hosts", lines)
+    if err != nil { return err }
+    nl2, err := updateTable("https_hosts", nl)
+    if err != nil { return err }
+    if err := writeLines(SNIPROXY_CONFIG, nl2); err != nil {
+        return err
+    }
+    logGreen("已同步域名到 sniproxy 的 table http_hosts/https_hosts")
+    return nil
 }
 
 // misc utilities retained
