@@ -16,15 +16,16 @@ func installNginxStream(log func(string)) error {
 	if err := writeStreamLoaderConf(); err == nil {
 		log("已写入模块加载文件 /etc/nginx/modules-enabled/50-mod-stream.conf")
 	}
-	log("执行: apt-get update")
-	if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "update"); err != nil {
-		return err
-	}
-	// 使用 nginx-extras（包含大部分模块），更省心
-	log("执行: apt-get install -y nginx-extras")
-	if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "install", "-y", "nginx-extras"); err != nil {
-		return err
-	}
+    // 强制以非交互模式运行 apt，避免 needrestart/tty 交互阻塞 TUI
+    log("执行: apt-get update (noninteractive)")
+    if err := runCmdPipe(func(s string) { log(s) }, "sh", "-lc", "DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a APT_LISTCHANGES_FRONTEND=none apt-get update"); err != nil {
+        return err
+    }
+    // 使用 nginx-extras（包含大部分模块），更省心
+    log("执行: apt-get install -y nginx-extras (noninteractive)")
+    if err := runCmdPipe(func(s string) { log(s) }, "sh", "-lc", "DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a APT_LISTCHANGES_FRONTEND=none apt-get install -y nginx-extras"); err != nil {
+        return err
+    }
 	log("启动并启用 nginx 服务")
 	_ = runCmdPipe(func(s string) { log(s) }, "systemctl", "enable", "nginx")
 	_ = runCmdPipe(func(s string) { log(s) }, "systemctl", "start", "nginx")
