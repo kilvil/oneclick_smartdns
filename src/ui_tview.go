@@ -833,9 +833,20 @@ func (s *tvState) confirmEmergencyResetDNS() {
 	m := tview.NewModal().SetText(text).AddButtons([]string{"执行", "取消"}).SetDoneFunc(func(i int, l string) {
 		s.pages.RemovePage("modal-emg")
 		if i == 0 {
-			emergencyResetDNS()
-			s.flushUI()
-			s.toast("已紧急重置 DNS 为 8.8.8.8")
+			logView := s.openLogModal("紧急重置 DNS")
+			go func() {
+				append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+				append("停止 smartdns ...")
+				_ = runCmdPipe(append, "systemctl", "stop", "smartdns")
+				append("停止 systemd-resolved ...")
+				_ = runCmdPipe(append, "systemctl", "stop", "systemd-resolved")
+				append("禁用 systemd-resolved 开机自启 ...")
+				_ = runCmdPipe(append, "systemctl", "disable", "systemd-resolved")
+				append("写入 /etc/resolv.conf -> 8.8.8.8 ...")
+				modifyResolv("8.8.8.8")
+				append("完成: 已紧急重置 DNS 为 8.8.8.8")
+				s.flushUI()
+			}()
 		}
 	})
 	s.pages.AddPage("modal-emg", center(70, 8, m), true, true)
@@ -865,22 +876,46 @@ func (s *tvState) openSmartDNSActions() {
 	})
 	list.AddItem("启动", "", 0, func() {
 		s.pages.RemovePage("modal")
-		startSmartDNS()
-		s.flushUI()
-		s.toast("已启动 SmartDNS 并设置开机自启")
+		logView := s.openLogModal("启动 SmartDNS")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("停止 systemd-resolved ...")
+			_ = runCmdPipe(append, "systemctl", "stop", "systemd-resolved")
+			append("禁用 systemd-resolved 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "disable", "systemd-resolved")
+			append("启动 smartdns ...")
+			_ = runCmdPipe(append, "systemctl", "start", "smartdns")
+			append("启用 smartdns 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "enable", "smartdns")
+			append("写入 /etc/resolv.conf -> 127.0.0.1 ...")
+			modifyResolv("127.0.0.1")
+			append("完成: SmartDNS 已启动")
+			s.flushUI()
+		}()
 	})
 	list.AddItem("停止", "", 0, func() {
 		s.pages.RemovePage("modal")
-		stopSmartDNS()
-		s.flushUI()
-		s.toast("已停止 SmartDNS 并关闭开机自启")
+		logView := s.openLogModal("停止 SmartDNS")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("停止 smartdns ...")
+			_ = runCmdPipe(append, "systemctl", "stop", "smartdns")
+			append("禁用 smartdns 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "disable", "smartdns")
+			append("完成: SmartDNS 已停止")
+			s.flushUI()
+		}()
 	})
 	list.AddItem("重启", "", 0, func() {
 		s.pages.RemovePage("modal")
-		stopSmartDNS()
-		startSmartDNS()
-		s.flushUI()
-		s.toast("已重启 SmartDNS")
+		logView := s.openLogModal("重启 SmartDNS")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("重启 smartdns ...")
+			_ = runCmdPipe(append, "systemctl", "restart", "smartdns")
+			append("完成: SmartDNS 已重启")
+			s.flushUI()
+		}()
 	})
 	list.AddItem("查看配置", SMART_CONFIG_FILE, 0, func() {
 		s.pages.RemovePage("modal")
@@ -922,27 +957,40 @@ func (s *tvState) openSniproxyActions() {
 	})
 	list.AddItem("启动", "", 0, func() {
 		s.pages.RemovePage("modal")
-		restoreSniproxy()
-		s.snActive = isSniproxyActive()
-		s.setHeader()
-		s.flushUI()
-		s.toast("已启动 sniproxy 并设置开机自启")
+		logView := s.openLogModal("启动 sniproxy")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("启动 sniproxy ...")
+			_ = runCmdPipe(append, "systemctl", "start", "sniproxy")
+			append("启用 sniproxy 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "enable", "sniproxy")
+			append("完成: sniproxy 已启动")
+			s.flushUI()
+		}()
 	})
 	list.AddItem("停止", "", 0, func() {
 		s.pages.RemovePage("modal")
-		stopSniproxy()
-		s.snActive = isSniproxyActive()
-		s.setHeader()
-		s.flushUI()
-		s.toast("已停止 sniproxy 并关闭开机自启")
+		logView := s.openLogModal("停止 sniproxy")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("停止 sniproxy ...")
+			_ = runCmdPipe(append, "systemctl", "stop", "sniproxy")
+			append("禁用 sniproxy 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "disable", "sniproxy")
+			append("完成: sniproxy 已停止")
+			s.flushUI()
+		}()
 	})
 	list.AddItem("重启", "", 0, func() {
 		s.pages.RemovePage("modal")
-		restartSniproxy()
-		s.snActive = isSniproxyActive()
-		s.setHeader()
-		s.flushUI()
-		s.toast("已重启 sniproxy")
+		logView := s.openLogModal("重启 sniproxy")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("重启 sniproxy ...")
+			_ = runCmdPipe(append, "systemctl", "restart", "sniproxy")
+			append("完成: sniproxy 已重启")
+			s.flushUI()
+		}()
 	})
 	list.AddItem("查看配置", SNIPROXY_CONFIG, 0, func() {
 		s.pages.RemovePage("modal")
