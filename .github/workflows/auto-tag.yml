@@ -1,0 +1,48 @@
+name: Auto Tag Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Bump Minor Version And Tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine Next Tag
+        id: versions
+        run: |
+          set -euo pipefail
+          latest="$(git tag --list 'v*' --sort=-version:refname | head -n 1)"
+          if [ -z "${latest}" ]; then
+            next="v0.1.0"
+          else
+            ver="${latest#v}"
+            IFS='.' read -r major minor patch <<< "${ver}"
+            minor=$((minor + 1))
+            next="v${major}.${minor}.0"
+          fi
+
+          echo "latest=${latest:-none}" >> "${GITHUB_OUTPUT}"
+          echo "next=${next}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create And Push Tag
+        run: |
+          next="${{ steps.versions.outputs.next }}"
+          echo "Creating tag ${next} for commit $GITHUB_SHA"
+          git tag "${next}" "${GITHUB_SHA}"
+          git push origin "${next}"
