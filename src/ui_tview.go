@@ -367,66 +367,101 @@ func (s *tvState) showEditIdent() {
 }
 
 func (s *tvState) saveSelection() {
-	count, err := s.saveSelectionSilent()
-	if err != nil {
-		s.toast(err.Error())
-		return
-	}
-	if count == 0 {
-		s.toast("未选择任何平台，无需保存")
-		return
-	}
-	if s.sdActive {
-		m := tview.NewModal().SetText(fmt.Sprintf("保存成功，已写入 %d 个平台\n是否重启 SmartDNS 应用新配置？", count)).
-			AddButtons([]string{"重启", "稍后"}).SetDoneFunc(func(i int, l string) {
-			s.pages.RemovePage("modal")
-			if i == 0 {
-				_ = runCmdInteractive("systemctl", "restart", "smartdns")
-				s.toast("已重启 SmartDNS")
-			} else {
-				s.toast("保存完成")
-			}
-		})
-		s.pages.AddPage("modal", center(50, 7, m), true, true)
-	} else {
-		s.toast("保存完成 (SmartDNS 未运行)")
-	}
+    count, err := s.saveSelectionSilent()
+    if err != nil {
+        s.toast(err.Error())
+        return
+    }
+    if count == 0 {
+        s.toast("没有可保存的变更")
+        return
+    }
+    if s.sdActive {
+        m := tview.NewModal().SetText(fmt.Sprintf("保存成功，变更 %d 个平台\n是否重启 SmartDNS 应用新配置？", count)).
+            AddButtons([]string{"重启", "稍后"}).SetDoneFunc(func(i int, l string) {
+                s.pages.RemovePage("modal")
+                if i == 0 {
+                    _ = runCmdInteractive("systemctl", "restart", "smartdns")
+                    s.toast("已重启 SmartDNS")
+                } else {
+                    s.toast("保存完成")
+                }
+            })
+        s.pages.AddPage("modal", center(50, 7, m), true, true)
+    } else {
+        s.toast("保存完成 (SmartDNS 未运行)")
+    }
 }
 
 // saveSelectionSilent writes current selection without any modal prompts.
 // It validates method and ident, applies rules, refreshes state, clears dirty.
 // Returns number of platforms written, or error for invalid state.
 func (s *tvState) saveSelectionSilent() (int, error) {
-	if s.method != "nameserver" && s.method != "address" {
-		return 0, fmt.Errorf("请选择正确的添加方式 (m)")
-	}
-	if strings.TrimSpace(s.ident) == "" {
-		if s.method == "nameserver" && s.activeGroup != "" {
-			s.ident = s.activeGroup
-			s.setHeader()
-		} else {
-			return 0, fmt.Errorf("请设置组名或IP (e)")
-		}
-	}
-    count := 0
+    if s.method != "nameserver" && s.method != "address" {
+        return 0, fmt.Errorf("请选择正确的添加方式 (m)")
+    }
+    if strings.TrimSpace(s.ident) == "" {
+        if s.method == "nameserver" && s.activeGroup != "" {
+            s.ident = s.activeGroup
+            s.setHeader()
+        } else {
+            return 0, fmt.Errorf("请设置组名或IP (e)")
+        }
+    }
+    // target assignment for this save
+    tgt := s.targetAssignment()
+    changed := 0
     ngReady := fileExists(NGINX_MAIN_CONF)
-	for key, on := range s.selected {
-		if !on {
-			continue
-		}
-		parts := strings.SplitN(key, "/", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		top := parts[0]
-		sub := parts[1]
-		domains := s.cfg[top][sub]
-		if len(domains) == 0 {
-			continue
-		}
-		_ = deletePlatformRules(sub)
-		_ = addDomainRules(s.method, domains, s.ident, sub)
-        count++
+    // Build a quick set of selected subs (by sub name)
+    selSubs := map[string]bool{}
+    for key, on := range s.selected {
+        if !on {
+            continue
+        }
+        parts := strings.SplitN(key, "/", 2)
+        if len(parts) != 2 { continue }
+        selSubs[parts[1]] = true
+    }
+    // Pass 1: remove assignments belonging to current target that are now unselected
+    for _, subs := range s.subMap {
+        for _, sub := range subs {
+            a, ok := s.assigned[sub]
+            if !ok { continue }
+            if a.Method != tgt.Method { continue }
+            if a.Method == "nameserver" {
+                if !strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident)) { continue }
+            } else { // address
+                if strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident) { continue }
+            }
+            if !selSubs[sub] {
+                _ = deletePlatformRules(sub)
+                changed++
+            }
+        }
+    }
+    // Pass 2: apply selected subs where assignment differs (or missing)
+    for key, on := range s.selected {
+        if !on { continue }
+        parts := strings.SplitN(key, "/", 2)
+        if len(parts) != 2 { continue }
+        top := parts[0]
+        sub := parts[1]
+        domains := s.cfg[top][sub]
+        if len(domains) == 0 { continue }
+        a, ok := s.assigned[sub]
+        if ok && a.Method == tgt.Method {
+            if a.Method == "nameserver" && strings.EqualFold(a.Ident, tgt.Ident) {
+                // already ours; skip rewrite
+                continue
+            }
+            if a.Method == "address" && a.Ident == tgt.Ident {
+                // already ours; skip rewrite
+                continue
+            }
+        }
+        _ = deletePlatformRules(sub)
+        _ = addDomainRules(s.method, domains, s.ident, sub)
+        changed++
     }
     // Ensure nginx proxy configs exist and reload nginx (if installed)
     if ngReady {
@@ -436,14 +471,14 @@ func (s *tvState) saveSelectionSilent() (int, error) {
             _ = nginxTestAndReload(func(string){})
         }
     }
-	if count > 0 {
-		s.refreshAssignments()
-		s.resetSelectionForActiveGroup()
-		s.populateRight()
-		s.dirty = false
-		s.setFooter()
-	}
-	return count, nil
+    if changed > 0 {
+        s.refreshAssignments()
+        s.resetSelectionForActiveGroup()
+        s.populateRight()
+        s.dirty = false
+        s.setFooter()
+    }
+    return changed, nil
 }
 
 func (s *tvState) toast(msg string) {
