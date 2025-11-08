@@ -22,23 +22,13 @@ func installSniproxyStream(log func(string)) error {
     if log == nil {
         log = func(string) {}
     }
-    tmp := "/tmp/sniproxy_installer"
-    _ = os.MkdirAll(tmp, 0o755)
-    script := filepath.Join(tmp, "smtdns_install.sh")
-    log("下载安装脚本: " + REMOTE_SNIPROXY_INSTALLER_URL)
-    // 使用我们自带的 HTTP 客户端，避免依赖 wget 是否存在
-    if err := downloadToFile(REMOTE_SNIPROXY_INSTALLER_URL, script, 180*time.Second); err != nil {
-        log("下载失败: " + err.Error())
-        // 回退：尝试用 wget，输出更接近你的命令
-        log("尝试使用 wget 下载 ...")
-        if err2 := runCmdPipe(func(s string) { log(s) }, "bash", "-lc", "wget '"+REMOTE_SNIPROXY_INSTALLER_URL+"' -O '"+script+"'"); err2 != nil {
-            return fmt.Errorf("下载安装脚本失败: %v", err2)
-        }
+    log("执行: apt-get update")
+    if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "update"); err != nil {
+        return err
     }
-    _ = os.Chmod(script, 0o755)
-    log("执行安装脚本 ...")
-    if err := runCmdPipe(func(s string) { log(s) }, "bash", script); err != nil {
-        return fmt.Errorf("安装脚本执行失败: %w", err)
+    log("执行: apt-get install -y sniproxy")
+    if err := runCmdPipe(func(s string) { log(s) }, "apt-get", "install", "-y", "sniproxy"); err != nil {
+        return err
     }
     // 写入 drop-in，显式指定配置路径
     log("写入 systemd drop-in (-c /etc/sniproxy.conf)")
