@@ -12,6 +12,8 @@ jobs:
   tag:
     name: Bump Minor Version And Tag
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.versions.outputs.next }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,3 +48,61 @@ jobs:
           echo "Creating tag ${next} for commit $GITHUB_SHA"
           git tag "${next}" "${GITHUB_SHA}"
           git push origin "${next}"
+
+  build:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    needs: tag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21.x'
+
+      - name: Go env
+        run: go env
+
+      - name: Build binary (no archive)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p dist
+          OUT="dist/smartdnsctl_linux_amd64"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "${OUT}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux-amd64
+          path: dist/smartdnsctl_linux_amd64
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+      - tag
+      - build
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-linux-amd64
+          path: dist
+
+      - name: List artifacts
+        run: ls -lah dist
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag_name }}
+          name: ${{ needs.tag.outputs.tag_name }}
+          draft: false
+          prerelease: false
+          files: |
+            dist/smartdnsctl_linux_amd64
