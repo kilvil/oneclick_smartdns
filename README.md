@@ -18,6 +18,16 @@ curl -fsSL https://raw.githubusercontent.com/kilvil/oneclick_smartdns/main/onecl
 - 自适应终端宽度：宽屏双栏（左一级/右二级），窄屏自动切换单页模式（左右切换页面）。
 - 依赖：`github.com/rivo/tview`、`github.com/gdamore/tcell/v2`
 
+DNS 上游分组与分配
+- g 打开分组管理（选择已有分组）；n 创建分组（输入上游 DNS IP 与分组名）；r 刷新分组列表。
+- 选择分组后，默认以 nameserver 方式将勾选的流媒体域名指向该分组（等价 `nameserver /domain/<group>`）。
+- 也可用 m 切换为 address 方式并 e 输入具体 IP。
+
+服务管理
+- z 打开服务管理：
+  - SmartDNS：安装、卸载、启动、停止、重启（启动会关闭 systemd-resolved 并将 resolv.conf 指向 127.0.0.1）
+  - sniproxy：安装、启动、停止、重启
+
 本地构建
 ```bash
 go env -w GOPROXY=https://proxy.golang.org,direct   # 无代理可省略
