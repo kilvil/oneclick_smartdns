@@ -298,6 +298,13 @@ func runTUI() {
     st.left.SetBorder(true)
     st.left.SetTitle("一级流媒体")
     st.left.SetSelectedFunc(func(i int, main, sec string, r rune) {})
+    // When selection changes via up/down, update right list to preview subs
+    st.left.SetChangedFunc(func(i int, main, sec string, shortcut rune) {
+        if i >= 0 && i < len(st.topKeys) {
+            st.curTop = st.topKeys[i]
+            st.populateRight()
+        }
+    })
     st.left.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
         switch ev.Key() {
         case tcell.KeyRight:
@@ -395,8 +402,8 @@ func runTUI() {
     // Groups page should be the entry
     st.app.SetRoot(st.pages, true)
     st.app.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
-        // Avoid global hotkeys when a modal or groups page is active
-        if name, _ := st.pages.GetFrontPage(); name == "modal" || name == "groups" {
+        // Avoid global hotkeys when a modal-like or groups page is active
+        if name, _ := st.pages.GetFrontPage(); name == "groups" || strings.HasPrefix(name, "modal") {
             return ev
         }
         switch ev.Key() {
@@ -553,12 +560,12 @@ func (s *tvState) showAddGroupModal(after func()) {
         for _, g := range s.groups { if strings.EqualFold(g.Name, name) { nameInput.SetTitle("已存在"); return } }
         line := fmt.Sprintf("server %s IP -group %s -exclude-default-group", ip, name)
         if err := insertServerIntoConfig(line, SMART_CONFIG_FILE); err != nil { s.toast("创建分组失败: " + err.Error()); return }
-        s.reloadGroups(); s.activeGroup = name; s.ident = name; s.method = "nameserver"; s.setHeader(); s.pages.RemovePage("modal"); if after != nil { after() }
+        s.reloadGroups(); s.activeGroup = name; s.ident = name; s.method = "nameserver"; s.setHeader(); s.pages.RemovePage("modal-add-group"); if after != nil { after() }
     })
-    form.AddButton("取消", func() { s.pages.RemovePage("modal") })
+    form.AddButton("取消", func() { s.pages.RemovePage("modal-add-group") })
     form.SetBorder(true).SetTitle("创建DNS分组").SetTitleAlign(tview.AlignLeft)
     modal := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(form, 0, 1, true)
-    s.pages.AddPage("modal", center(60, 10, modal), true, true)
+    s.pages.AddPage("modal-add-group", center(60, 10, modal), true, true)
 }
 
 // ----- Group-first navigation -----
