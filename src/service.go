@@ -81,6 +81,15 @@ func restartService(service string) { _ = manageService(service, "restart", "重
 func restartSmartDNS()              { restartService("smartdns") }
 func restartSniproxy()              { restartService("sniproxy") }
 
+// emergencyResetDNS stops smartdns and systemd-resolved, then writes resolv.conf to 8.8.8.8
+// This helps recover networking when DNS is misconfigured.
+func emergencyResetDNS() {
+	stopService("smartdns")
+	stopService("systemd-resolved")
+	modifyResolv("8.8.8.8")
+	logGreen("已将系统 DNS 紧急重置为 8.8.8.8（已停止 smartdns 与 systemd-resolved）")
+}
+
 func modifyResolv(ip string) {
 	content := fmt.Sprintf("nameserver %s\n", ip)
 	if err := os.WriteFile("/etc/resolv.conf", []byte(content), 0o644); err != nil {

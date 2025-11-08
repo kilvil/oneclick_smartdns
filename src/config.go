@@ -108,6 +108,80 @@ func viewUpstreamDNSGroups() {
 
 func ensureSmartDNSDir() error { return ensureDir(filepath.Dir(SMART_CONFIG_FILE)) }
 
+// parseDefaultServers returns ordered plain 'server <ip>' entries from config.
+func parseDefaultServers() []string {
+	var out []string
+	lines, err := readLines(SMART_CONFIG_FILE)
+	if err != nil {
+		return out
+	}
+	for _, l := range lines {
+		if m := reServerLine.FindStringSubmatch(strings.TrimSpace(l)); len(m) == 2 {
+			out = append(out, m[1])
+		}
+	}
+	return out
+}
+
+// setDefaultServers replaces all plain 'server <ip>' lines with the provided ordered list.
+func setDefaultServers(ips []string) error {
+	lines, err := readLines(SMART_CONFIG_FILE)
+	if err != nil {
+		return err
+	}
+	// filter out existing plain server lines
+	var rest []string
+	for _, l := range lines {
+		if reServerLine.MatchString(strings.TrimSpace(l)) {
+			// skip
+			continue
+		}
+		rest = append(rest, l)
+	}
+	// de-duplicate while preserving order
+	seen := map[string]bool{}
+	var newLines []string
+	for _, ip := range ips {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		if seen[ip] {
+			continue
+		}
+		seen[ip] = true
+		newLines = append(newLines, "server "+ip)
+	}
+	// prepend default servers at the beginning for determinism
+	newLines = append(newLines, rest...)
+	return writeLines(SMART_CONFIG_FILE, newLines)
+}
+
+func addDefaultServer(ip string) error {
+	ip = strings.TrimSpace(ip)
+	if net.ParseIP(ip) == nil {
+		return fmt.Errorf("无效IP: %s", ip)
+	}
+	current := parseDefaultServers()
+	for _, v := range current {
+		if strings.EqualFold(v, ip) {
+			return nil
+		}
+	}
+	current = append(current, ip)
+	return setDefaultServers(current)
+}
+
+func removeDefaultServerAt(idx int) error {
+	current := parseDefaultServers()
+	if idx < 0 || idx >= len(current) {
+		return fmt.Errorf("索引越界")
+	}
+	next := append([]string{}, current[:idx]...)
+	next = append(next, current[idx+1:]...)
+	return setDefaultServers(next)
+}
+
 func configureSmartDNS(r *bufio.Reader) {
 	logBlue("正在配置 SmartDNS...")
 	if err := ensureSmartDNSDir(); err != nil {

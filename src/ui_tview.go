@@ -750,6 +750,9 @@ func runTUI() {
 			case 'n':
 				st.showAddGroupModal(nil)
 				return nil
+			case 'u':
+				st.openDefaultDNSManager()
+				return nil
 			case 'r':
 				st.reloadGroups()
 				st.toast("已刷新分组")
@@ -815,10 +818,27 @@ func runTUI() {
 func (s *tvState) openServiceManager() {
 	options := tview.NewList().ShowSecondaryText(false)
 	options.SetBorder(true).SetTitle("服务管理")
+	options.AddItem("紧急重置 DNS -> 8.8.8.8", "停止 smartdns/systemd-resolved 并覆盖 /etc/resolv.conf", 0, func() {
+		s.pages.RemovePage("modal")
+		s.confirmEmergencyResetDNS()
+	})
 	options.AddItem("SmartDNS", "安装/卸载/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSmartDNSActions() })
 	options.AddItem("sniproxy", "安装/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSniproxyActions() })
 	options.AddItem("关闭", "", 0, func() { s.pages.RemovePage("modal") })
 	s.pages.AddPage("modal", center(50, 12, options), true, true)
+}
+
+func (s *tvState) confirmEmergencyResetDNS() {
+	text := "将停止 smartdns 和 systemd-resolved，并把 /etc/resolv.conf 设置为 8.8.8.8。\n确定要执行紧急重置吗？"
+	m := tview.NewModal().SetText(text).AddButtons([]string{"执行", "取消"}).SetDoneFunc(func(i int, l string) {
+		s.pages.RemovePage("modal-emg")
+		if i == 0 {
+			emergencyResetDNS()
+			s.flushUI()
+			s.toast("已紧急重置 DNS 为 8.8.8.8")
+		}
+	})
+	s.pages.AddPage("modal-emg", center(70, 8, m), true, true)
 }
 
 func (s *tvState) openSmartDNSActions() {
@@ -1055,14 +1075,134 @@ func (s *tvState) showAddGroupModal(after func()) {
 	s.pages.AddPage("modal-add-group", center(60, 10, modal), true, true)
 }
 
+// ----- Default upstream DNS manager -----
+
+func (s *tvState) openDefaultDNSManager() {
+	// build list of current default servers
+	ds := parseDefaultServers()
+	list := tview.NewList().ShowSecondaryText(false)
+	list.SetBorder(true).SetTitle("默认上游 DNS (A添加推荐, C自定义, X删除, Esc关闭)")
+	for i, ip := range ds {
+		idx := i
+		list.AddItem(ip, "", 0, func() {
+			// no-op on enter; deletion uses X
+			_ = idx
+		})
+	}
+	list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyRune {
+			switch ev.Rune() {
+			case 'a', 'A':
+				s.showRecommendedDNS()
+				return nil
+			case 'c', 'C':
+				s.showAddDefaultDNS()
+				return nil
+			case 'x', 'X':
+				if len(ds) == 0 {
+					return nil
+				}
+				idx := list.GetCurrentItem()
+				if idx < 0 || idx >= len(ds) {
+					return nil
+				}
+				s.confirmDeleteDefaultDNS(idx, ds[idx])
+				return nil
+			}
+		}
+		if ev.Key() == tcell.KeyEsc {
+			s.pages.RemovePage("modal-default-dns")
+			return nil
+		}
+		return ev
+	})
+	if s.pages.HasPage("modal-default-dns") {
+		s.pages.RemovePage("modal-default-dns")
+	}
+	s.pages.AddPage("modal-default-dns", center(60, 15, list), true, true)
+}
+
+func (s *tvState) refreshDefaultDNSManager() { s.openDefaultDNSManager() }
+
+func (s *tvState) showRecommendedDNS() {
+	type rec struct{ ip, desc string }
+	recs := []rec{
+		{"223.5.5.5", "AliDNS"},
+		{"223.6.6.6", "AliDNS"},
+		{"119.29.29.29", "DNSPod"},
+		{"1.1.1.1", "Cloudflare"},
+		{"1.0.0.1", "Cloudflare"},
+		{"8.8.8.8", "Google"},
+		{"8.8.4.4", "Google"},
+		{"9.9.9.9", "Quad9"},
+		{"114.114.114.114", "114DNS"},
+		{"180.76.76.76", "Baidu"},
+	}
+	list := tview.NewList().ShowSecondaryText(false)
+	list.SetBorder(true).SetTitle("添加推荐 DNS (Enter添加, Esc返回)")
+	for _, r := range recs {
+		rr := r
+		label := rr.ip + " (" + rr.desc + ")"
+		list.AddItem(label, "", 0, func() {
+			_ = addDefaultServer(rr.ip)
+			s.pages.RemovePage("modal-rec-dns")
+			s.refreshDefaultDNSManager()
+		})
+	}
+	list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyEsc {
+			s.pages.RemovePage("modal-rec-dns")
+			return nil
+		}
+		return ev
+	})
+	s.pages.AddPage("modal-rec-dns", center(50, 15, list), true, true)
+}
+
+func (s *tvState) showAddDefaultDNS() {
+	form := tview.NewForm()
+	ip := tview.NewInputField().SetLabel("DNS IP: ")
+	form.AddFormItem(ip)
+	form.AddButton("添加", func() {
+		val := strings.TrimSpace(ip.GetText())
+		if net.ParseIP(val) == nil {
+			ip.SetTitle("无效IP")
+			return
+		}
+		if err := addDefaultServer(val); err != nil {
+			s.toast("添加失败: " + err.Error())
+			return
+		}
+		s.pages.RemovePage("modal-add-dns")
+		s.refreshDefaultDNSManager()
+	})
+	form.AddButton("取消", func() { s.pages.RemovePage("modal-add-dns") })
+	form.SetBorder(true).SetTitle("添加默认 DNS").SetTitleAlign(tview.AlignLeft)
+	s.pages.AddPage("modal-add-dns", center(50, 8, form), true, true)
+}
+
+func (s *tvState) confirmDeleteDefaultDNS(idx int, ip string) {
+	m := tview.NewModal().SetText("确认删除默认 DNS: " + ip + "？").AddButtons([]string{"删除", "取消"}).SetDoneFunc(func(i int, l string) {
+		s.pages.RemovePage("modal-del-dns")
+		if i == 0 {
+			if err := removeDefaultServerAt(idx); err != nil {
+				s.toast("删除失败: " + err.Error())
+				return
+			}
+			s.refreshDefaultDNSManager()
+		}
+	})
+	s.pages.AddPage("modal-del-dns", center(50, 8, m), true, true)
+}
+
 // ----- Group-first navigation -----
 
 func (s *tvState) openGroupsPage() {
 	s.activeGroup = ""
 	s.setHeader()
 	list := tview.NewList().ShowSecondaryText(false)
-	list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, Q退出)")
-	s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
+	list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, U默认DNS, Q退出)")
+	s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  u 默认DNS  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
 	// refresh groups data
 	s.reloadGroups()
 	for _, g := range s.groups {
@@ -1094,6 +1234,9 @@ func (s *tvState) openGroupsPage() {
 			switch ev.Rune() {
 			case 'n', 'N':
 				s.showAddGroupModal(func() { s.openGroupsPage() })
+				return nil
+			case 'u', 'U':
+				s.openDefaultDNSManager()
 				return nil
 			case 'z', 'Z':
 				s.openServiceManager()
