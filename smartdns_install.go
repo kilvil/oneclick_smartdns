@@ -273,7 +273,7 @@ func configureSmartDNS(r *bufio.Reader) {
 		return
 	}
 	logGreen("默认配置文件已生成：" + SMART_CONFIG_FILE)
-	addUpstreamDNSGroup(r) // optional interactive additions
+    addUpstreamDNSGroup(r)
 	logGreen("SmartDNS 配置完成！")
 }
 
@@ -498,14 +498,12 @@ func installSmartDNS() {
 	logGreen("SmartDNS 安装成功！")
 }
 
-// Stream config YAML (limited parser for structure: map[string]map[string][]string)
 type StreamConfig map[string]map[string][]string
 
 func getScriptDir() string {
-	// Prefer current working directory to behave like shell script location
-	if wd, err := os.Getwd(); err == nil {
-		return wd
-	}
+    if wd, err := os.Getwd(); err == nil {
+        return wd
+    }
 	exe, err := os.Executable()
 	if err != nil {
 		return "."
@@ -611,7 +609,6 @@ func viewStreamingPlatforms(r *bufio.Reader) {
 	for k := range cfg {
 		keys = append(keys, k)
 	}
-	// Keep deterministic order by sorting? We will present in natural map order; acceptable.
 	for _, k := range keys {
 		fmt.Printf("%d. %s\n", i, k)
 		i++
@@ -752,8 +749,7 @@ func addStreamingPlatform(r *bufio.Reader) {
 		logRed("读取配置失败: " + err.Error())
 		return
 	}
-	// choose top-level
-	topKeys := make([]string, 0, len(cfg))
+    topKeys := make([]string, 0, len(cfg))
 	for k := range cfg {
 		topKeys = append(topKeys, k)
 	}
@@ -768,8 +764,7 @@ func addStreamingPlatform(r *bufio.Reader) {
 		return
 	}
 	top := topKeys[idx-1]
-	// choose sub level (support comma-separated multi-select by index or by name)
-	subKeys := make([]string, 0, len(cfg[top]))
+    subKeys := make([]string, 0, len(cfg[top]))
 	for k := range cfg[top] {
 		subKeys = append(subKeys, k)
 	}
@@ -784,7 +779,6 @@ func addStreamingPlatform(r *bufio.Reader) {
 		return
 	}
 
-	// choose once: method + group/IP
 	fmt.Println(CYAN + "请选择添加方式：" + RESET)
 	fmt.Println(YELLOW + "1. nameserver方式" + RESET)
 	fmt.Println(YELLOW + "2. address方式" + RESET)
@@ -973,9 +967,8 @@ func viewAddedPlatforms() {
 	}
 	seen := map[string]bool{}
 	for _, l := range lines {
-		if strings.HasPrefix(l, "#> ") {
-			// output without the leading '# '
-			name := strings.TrimSpace(strings.TrimPrefix(l, "#> "))
+        if strings.HasPrefix(l, "#> ") {
+            name := strings.TrimSpace(strings.TrimPrefix(l, "#> "))
 			if !seen[name] {
 				fmt.Println(name)
 				seen[name] = true
@@ -987,7 +980,6 @@ func viewAddedPlatforms() {
 	}
 }
 
-// sniproxy helpers
 func addDomainToSniproxyTable(domain string) error {
 	if !fileExists(SNIPROXY_CONFIG) {
 		return fmt.Errorf("sniproxy 配置文件未找到: %s", SNIPROXY_CONFIG)
@@ -1007,15 +999,12 @@ func addDomainToSniproxyTable(domain string) error {
 		return fmt.Errorf("sniproxy 配置文件中的 table 块未找到")
 	}
 
-	// check existence
 	pattern := ".*" + regexp.QuoteMeta(domain) + " *"
 	for _, l := range lines {
 		if strings.Contains(l, domain) && strings.HasPrefix(strings.TrimSpace(l), ".*") {
-			// heuristic match
-			return nil // already exists
+			return nil
 		}
 	}
-	// insert after table {
 	insert := "    .*" + domain + " *"
 	newLines := append([]string{}, lines[:hasTable+1]...)
 	newLines = append(newLines, insert)
@@ -1024,7 +1013,7 @@ func addDomainToSniproxyTable(domain string) error {
 		return err
 	}
 	logGreen("已添加域名：" + domain + " 到 table 块内")
-	_ = pattern // silence unused variable if heuristics change
+    _ = pattern
 	return nil
 }
 
@@ -1046,8 +1035,7 @@ func addStreamingToSniproxy(platform, sub string) {
 		}
 		return
 	}
-	// only top level provided; loop subs
-	logCyan("正在处理一级平台：" + platform)
+    logCyan("正在处理一级平台：" + platform)
 	for s, domains := range cfg[platform] {
 		if len(domains) == 0 {
 			continue
@@ -1055,7 +1043,7 @@ func addStreamingToSniproxy(platform, sub string) {
 		for _, d := range domains {
 			_ = addDomainToSniproxyTable(d)
 		}
-		_ = s // not used otherwise
+        _ = s
 	}
 }
 
@@ -1073,9 +1061,8 @@ func addStreamingDomainsToSniproxy(r *bufio.Reader) {
 		return
 	}
 	switch s {
-	case "1":
-		// choose top
-		topKeys := make([]string, 0, len(cfg))
+    case "1":
+        topKeys := make([]string, 0, len(cfg))
 		for k := range cfg {
 			topKeys = append(topKeys, k)
 		}
@@ -1090,8 +1077,7 @@ func addStreamingDomainsToSniproxy(r *bufio.Reader) {
 			return
 		}
 		top := topKeys[idx-1]
-		// choose sub(s)
-		subKeys := make([]string, 0, len(cfg[top]))
+        subKeys := make([]string, 0, len(cfg[top]))
 		for k := range cfg[top] {
 			subKeys = append(subKeys, k)
 		}
@@ -1129,15 +1115,13 @@ func addStreamingDomainsToSniproxy(r *bufio.Reader) {
 	}
 }
 
-// resolveMultiSelection parses a comma-separated line where each token can be a 1-based index or a name.
 func resolveMultiSelection(input string, options []string) []string {
 	if strings.TrimSpace(input) == "" {
 		return nil
 	}
 	tokens := strings.Split(input, ",")
 	var out []string
-	// Build a name lookup (case-insensitive)
-	byName := map[string]string{}
+    byName := map[string]string{}
 	for _, v := range options {
 		byName[strings.ToLower(strings.TrimSpace(v))] = v
 	}
@@ -1146,20 +1130,17 @@ func resolveMultiSelection(input string, options []string) []string {
 		if tok == "" {
 			continue
 		}
-		if n, err := strconv.Atoi(tok); err == nil {
-			// index
-			if n >= 1 && n <= len(options) {
-				out = append(out, options[n-1])
-			}
-			continue
-		}
-		// name
-		if v, ok := byName[strings.ToLower(tok)]; ok {
-			out = append(out, v)
-		}
-	}
-	// de-duplicate
-	uniq := make([]string, 0, len(out))
+        if n, err := strconv.Atoi(tok); err == nil {
+            if n >= 1 && n <= len(options) {
+                out = append(out, options[n-1])
+            }
+            continue
+        }
+        if v, ok := byName[strings.ToLower(tok)]; ok {
+            out = append(out, v)
+        }
+    }
+    uniq := make([]string, 0, len(out))
 	seen := map[string]bool{}
 	for _, v := range out {
 		if !seen[v] {
@@ -1170,7 +1151,6 @@ func resolveMultiSelection(input string, options []string) []string {
 	return uniq
 }
 
-// UFW helpers
 func checkAndEnableUFW(r *bufio.Reader) bool {
 	if _, err := exec.LookPath("ufw"); err != nil {
 		logYellow("未检测到 UFW 防火墙。是否安装 UFW？(y/N):")
@@ -1258,7 +1238,6 @@ func setGlobalDNS() {
 }
 
 func regionTest() {
-	// Just mirror shell: bash <(curl -L -s URL)
 	_ = runShellInteractive("bash <(curl -L -s " + REMOTE_RegionRestrictionCheck_URL + ")")
 }
 

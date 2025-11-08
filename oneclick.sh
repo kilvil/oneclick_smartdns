@@ -22,4 +22,6 @@ $SUDO curl -fL "$URL" -o "/usr/local/bin/$BIN"
 $SUDO chmod +x "/usr/local/bin/$BIN"
 
 # 以 root 权限启动
-$SUDO "/usr/local/bin/$BIN"
+# $SUDO "/usr/local/bin/$BIN"
+# echo 告知用户使用 $BIN 命令启动
+echo "下载成功, 使用 $BIN 命令启动"
