@@ -79,6 +79,10 @@ type tvState struct {
 
 	dirty bool // 有未保存更改
 
+	// pendingDrops records assignments (method+ident) that should be treated as
+	// removed in UI immediately and will be actually removed from file on save.
+	pendingDrops []Assignment
+
 	// initial service states at app start; used for exit restart prompt
 	initialSdActive bool
 	initialNgActive bool
@@ -189,6 +193,24 @@ func (s *tvState) isOccupiedByOtherGroup(sub string) bool {
 	if !ok {
 		return false
 	}
+	// If this assignment matches a pending drop (to be removed on save),
+	// treat it as not occupying to avoid self-occupation during method switch.
+	if len(s.pendingDrops) > 0 {
+		for _, pd := range s.pendingDrops {
+			if a.Method != pd.Method {
+				continue
+			}
+			if a.Method == "nameserver" {
+				if strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(pd.Ident)) {
+					return false
+				}
+			} else { // address
+				if strings.TrimSpace(a.Ident) == strings.TrimSpace(pd.Ident) {
+					return false
+				}
+			}
+		}
+	}
 	// determine current target (method+ident)
 	tgt := s.targetAssignment()
 	if tgt.Ident == "" {
@@ -284,6 +306,17 @@ func (s *tvState) syncTargetFromAssignments() {
 	lower := strings.ToLower(strings.TrimSpace(s.activeGroup))
 	for _, a := range s.assigned {
 		if a.Method == "nameserver" && strings.ToLower(strings.TrimSpace(a.Ident)) == lower {
+			// if this nameserver assignment is scheduled to be dropped, ignore it
+			drop := false
+			for _, pd := range s.pendingDrops {
+				if pd.Method == "nameserver" && strings.EqualFold(strings.TrimSpace(pd.Ident), strings.TrimSpace(a.Ident)) {
+					drop = true
+					break
+				}
+			}
+			if drop {
+				continue
+			}
 			s.method = "nameserver"
 			s.ident = s.activeGroup
 			return
@@ -508,6 +541,11 @@ func (s *tvState) saveSelectionSilent() (int, error) {
 	if s.method == "address" && net.ParseIP(strings.TrimSpace(s.ident)) == nil {
 		return 0, fmt.Errorf("address 模式需要合法 IP，当前为 %s", s.ident)
 	}
+	// ensure any pending drops are applied to file first
+	for _, pd := range s.pendingDrops {
+		s.removeAssignmentsForTarget(pd)
+	}
+	s.pendingDrops = nil
 	// target assignment for this save
 	tgt := s.targetAssignment()
 	changed := 0
@@ -939,8 +977,9 @@ func runTUI() {
 				return nil
 			case 'm':
 				if st.method == "nameserver" {
+					// switching to address; mark current nameserver(group) as pending drop
 					prev := st.targetAssignment()
-					removed := st.removeAssignmentsForTarget(prev)
+					st.pendingDrops = append(st.pendingDrops, prev)
 					st.method = "address"
 					if strings.TrimSpace(st.ident) == "" {
 						if ip := strings.TrimSpace(st.selfPubV4); ip != "" {
@@ -950,17 +989,18 @@ func runTUI() {
 							st.selfPubV4 = st.ident
 						}
 					}
-					st.refreshAssignments()
 					st.selected = map[string]bool{}
-					if removed > 0 {
-						st.toast(fmt.Sprintf("已移除 %d 个原 nameserver 规则，请重新选择 address 目标", removed))
-					}
+					st.dirty = true
 				} else {
+					// switching to nameserver; mark current address(IP) as pending drop
+					prev := st.targetAssignment()
+					st.pendingDrops = append(st.pendingDrops, prev)
 					st.method = "nameserver"
 					if st.activeGroup != "" {
 						st.ident = st.activeGroup
 					}
 					st.resetSelectionForActiveGroup()
+					st.dirty = true
 				}
 				st.populateLeft()
 				st.populateRight()
