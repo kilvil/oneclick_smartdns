@@ -79,9 +79,9 @@ type tvState struct {
 
 	dirty bool // 有未保存更改
 
-	// pendingDrops records assignments (method+ident) that should be treated as
-	// removed in UI immediately and will be actually removed from file on save.
-	pendingDrops []Assignment
+    // pendingDrops records assignments (method+ident) that should be treated as
+    // removed in UI immediately and will be actually removed from file on save.
+    pendingDrops []Assignment
 
 	// initial service states at app start; used for exit restart prompt
 	initialSdActive bool
@@ -189,10 +189,10 @@ func (s *tvState) refreshAssignments() {
 }
 
 func (s *tvState) isOccupiedByOtherGroup(sub string) bool {
-	a, ok := s.assigned[sub]
-	if !ok {
-		return false
-	}
+    a, ok := s.assigned[sub]
+    if !ok {
+        return false
+    }
 	// If this assignment matches a pending drop (to be removed on save),
 	// treat it as not occupying to avoid self-occupation during method switch.
 	if len(s.pendingDrops) > 0 {
@@ -225,6 +225,30 @@ func (s *tvState) isOccupiedByOtherGroup(sub string) bool {
 	}
 	// address: exact match
 	return strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident)
+}
+
+// dropInMemoryAssignments removes current in-memory assignment entries that
+// match the given target (method+ident). This models the user's intention
+// immediately in the UI before saving to disk, so that occupancy and target
+// syncing will not flip back to the previous state.
+func (s *tvState) dropInMemoryAssignments(tgt Assignment) {
+    if tgt.Method == "" || strings.TrimSpace(tgt.Ident) == "" {
+        return
+    }
+    for sub, a := range s.assigned {
+        if a.Method != tgt.Method {
+            continue
+        }
+        if a.Method == "nameserver" {
+            if strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident)) {
+                delete(s.assigned, sub)
+            }
+        } else { // address
+            if strings.TrimSpace(a.Ident) == strings.TrimSpace(tgt.Ident) {
+                delete(s.assigned, sub)
+            }
+        }
+    }
 }
 
 func (s *tvState) resetSelectionForActiveGroup() {
@@ -281,17 +305,25 @@ func (s *tvState) removeAssignmentsForTarget(tgt Assignment) int {
 }
 
 func (s *tvState) syncTargetFromAssignments() {
-	if s.activeGroup == "" {
-		return
-	}
-	if s.assigned == nil {
-		s.assigned = map[string]Assignment{}
-	}
-	if s.activeGroup == SPECIAL_UNLOCK_GROUP_NAME {
-		s.method = "address"
-		preferred := strings.TrimSpace(s.ident)
-		if preferred == "" {
-			preferred = strings.TrimSpace(s.selfPubV4)
+    if s.activeGroup == "" {
+        return
+    }
+    if s.assigned == nil {
+        s.assigned = map[string]Assignment{}
+    }
+    // If user has unsaved changes or has just switched method (pendingDrops),
+    // do not override current method/ident from file. Keep sticky target.
+    if s.dirty || len(s.pendingDrops) > 0 {
+        if s.method == "nameserver" && strings.TrimSpace(s.ident) == "" {
+            s.ident = s.activeGroup
+        }
+        return
+    }
+    if s.activeGroup == SPECIAL_UNLOCK_GROUP_NAME {
+        s.method = "address"
+        preferred := strings.TrimSpace(s.ident)
+        if preferred == "" {
+            preferred = strings.TrimSpace(s.selfPubV4)
 		}
 		if ip := s.pickAddressIdent(preferred); ip != "" {
 			s.ident = ip
@@ -301,27 +333,27 @@ func (s *tvState) syncTargetFromAssignments() {
 		} else if s.ident == "" {
 			s.ident = preferred
 		}
-		return
-	}
-	lower := strings.ToLower(strings.TrimSpace(s.activeGroup))
-	for _, a := range s.assigned {
-		if a.Method == "nameserver" && strings.ToLower(strings.TrimSpace(a.Ident)) == lower {
-			// if this nameserver assignment is scheduled to be dropped, ignore it
-			drop := false
-			for _, pd := range s.pendingDrops {
-				if pd.Method == "nameserver" && strings.EqualFold(strings.TrimSpace(pd.Ident), strings.TrimSpace(a.Ident)) {
-					drop = true
-					break
-				}
-			}
-			if drop {
-				continue
-			}
-			s.method = "nameserver"
-			s.ident = s.activeGroup
-			return
-		}
-	}
+        return
+    }
+    lower := strings.ToLower(strings.TrimSpace(s.activeGroup))
+    for _, a := range s.assigned {
+        if a.Method == "nameserver" && strings.ToLower(strings.TrimSpace(a.Ident)) == lower {
+            // if this nameserver assignment is scheduled to be dropped, ignore it
+            drop := false
+            for _, pd := range s.pendingDrops {
+                if pd.Method == "nameserver" && strings.EqualFold(strings.TrimSpace(pd.Ident), strings.TrimSpace(a.Ident)) {
+                    drop = true
+                    break
+                }
+            }
+            if drop {
+                continue
+            }
+            s.method = "nameserver"
+            s.ident = s.activeGroup
+            return
+        }
+    }
 	// fallback: keep address if explicitly set and still present
 	if s.method == "address" && strings.TrimSpace(s.ident) != "" {
 		ident := strings.TrimSpace(s.ident)
@@ -475,21 +507,25 @@ func (s *tvState) showEditIdent() {
 	}
 	input := tview.NewInputField().SetLabel(label + ": ").SetText(def)
 	form.AddFormItem(input)
-	form.AddButton("确定", func() {
-		val := strings.TrimSpace(input.GetText())
-		if s.method == "address" && net.ParseIP(val) == nil {
-			input.SetTitle("无效IP")
-			return
-		}
-		if s.method == "nameserver" && val == "" {
-			input.SetTitle("不能为空")
-			return
-		}
-		s.ident = val
-		s.setHeader()
-		s.pages.RemovePage("modal")
-		s.app.SetFocus(s.right)
-	})
+    form.AddButton("确定", func() {
+        val := strings.TrimSpace(input.GetText())
+        if s.method == "address" && net.ParseIP(val) == nil {
+            input.SetTitle("无效IP")
+            return
+        }
+        if s.method == "nameserver" && val == "" {
+            input.SetTitle("不能为空")
+            return
+        }
+        s.ident = val
+        s.setHeader()
+        s.dirty = true
+        s.populateLeft()
+        s.populateRight()
+        s.setFooter()
+        s.pages.RemovePage("modal")
+        s.app.SetFocus(s.right)
+    })
 	form.AddButton("取消", func() { s.pages.RemovePage("modal") })
 	form.SetBorder(true).SetTitle("编辑标识").SetTitleAlign(tview.AlignLeft)
 	modal := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(form, 0, 1, true)
@@ -975,12 +1011,14 @@ func runTUI() {
 					st.openGroupsPage()
 				}
 				return nil
-			case 'm':
-				if st.method == "nameserver" {
-					// switching to address; mark current nameserver(group) as pending drop
-					prev := st.targetAssignment()
-					st.pendingDrops = append(st.pendingDrops, prev)
-					st.method = "address"
+				case 'm':
+					if st.method == "nameserver" {
+						// switching to address; mark current nameserver(group) as pending drop
+						prev := st.targetAssignment()
+						st.pendingDrops = append(st.pendingDrops, prev)
+						// reflect removal immediately in memory to avoid flip back
+						st.dropInMemoryAssignments(prev)
+						st.method = "address"
 					if strings.TrimSpace(st.ident) == "" {
 						if ip := strings.TrimSpace(st.selfPubV4); ip != "" {
 							st.ident = ip
@@ -992,10 +1030,12 @@ func runTUI() {
 					st.selected = map[string]bool{}
 					st.dirty = true
 				} else {
-					// switching to nameserver; mark current address(IP) as pending drop
-					prev := st.targetAssignment()
-					st.pendingDrops = append(st.pendingDrops, prev)
-					st.method = "nameserver"
+						// switching to nameserver; mark current address(IP) as pending drop
+						prev := st.targetAssignment()
+						st.pendingDrops = append(st.pendingDrops, prev)
+						// reflect removal immediately in memory to avoid flip back
+						st.dropInMemoryAssignments(prev)
+						st.method = "nameserver"
 					if st.activeGroup != "" {
 						st.ident = st.activeGroup
 					}
@@ -1007,9 +1047,9 @@ func runTUI() {
 				st.setHeader()
 				st.setFooter()
 				return nil
-			case 'e':
-				st.showEditIdent()
-				return nil
+				case 'e':
+					st.showEditIdent()
+					return nil
 			case 's':
 				st.saveSelection()
 				return nil
