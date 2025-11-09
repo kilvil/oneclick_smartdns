@@ -231,6 +231,33 @@ func (s *tvState) resetSelectionForActiveGroup() {
 	}
 }
 
+func (s *tvState) removeAssignmentsForTarget(tgt Assignment) int {
+	if tgt.Method == "" || strings.TrimSpace(tgt.Ident) == "" {
+		return 0
+	}
+	removed := 0
+	for sub, a := range s.assigned {
+		if a.Method != tgt.Method {
+			continue
+		}
+		match := false
+		if a.Method == "nameserver" {
+			match = strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident))
+		} else {
+			match = strings.TrimSpace(a.Ident) == strings.TrimSpace(tgt.Ident)
+		}
+		if !match {
+			continue
+		}
+		if err := deletePlatformRules(sub); err != nil {
+			logYellow("删除规则失败: " + err.Error())
+			continue
+		}
+		removed++
+	}
+	return removed
+}
+
 func (s *tvState) syncTargetFromAssignments() {
 	if s.activeGroup == "" {
 		return
@@ -477,6 +504,9 @@ func (s *tvState) saveSelectionSilent() (int, error) {
 		} else {
 			return 0, fmt.Errorf("请设置组名或IP (e)")
 		}
+	}
+	if s.method == "address" && net.ParseIP(strings.TrimSpace(s.ident)) == nil {
+		return 0, fmt.Errorf("address 模式需要合法 IP，当前为 %s", s.ident)
 	}
 	// target assignment for this save
 	tgt := s.targetAssignment()
@@ -909,11 +939,33 @@ func runTUI() {
 				return nil
 			case 'm':
 				if st.method == "nameserver" {
+					prev := st.targetAssignment()
+					removed := st.removeAssignmentsForTarget(prev)
 					st.method = "address"
+					if strings.TrimSpace(st.ident) == "" {
+						if ip := strings.TrimSpace(st.selfPubV4); ip != "" {
+							st.ident = ip
+						} else {
+							st.ident = getPublicIPv4()
+							st.selfPubV4 = st.ident
+						}
+					}
+					st.refreshAssignments()
+					st.selected = map[string]bool{}
+					if removed > 0 {
+						st.toast(fmt.Sprintf("已移除 %d 个原 nameserver 规则，请重新选择 address 目标", removed))
+					}
 				} else {
 					st.method = "nameserver"
+					if st.activeGroup != "" {
+						st.ident = st.activeGroup
+					}
+					st.resetSelectionForActiveGroup()
 				}
+				st.populateLeft()
+				st.populateRight()
 				st.setHeader()
+				st.setFooter()
 				return nil
 			case 'e':
 				st.showEditIdent()
