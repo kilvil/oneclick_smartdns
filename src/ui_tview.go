@@ -16,8 +16,8 @@ func isSmartDNSActive() bool {
 }
 
 func isNginxActive() bool {
-    out, _ := runCmdCapture("systemctl", "is-active", "nginx")
-    return strings.TrimSpace(out) == "active"
+	out, _ := runCmdCapture("systemctl", "is-active", "nginx")
+	return strings.TrimSpace(out) == "active"
 }
 
 func isSystemResolverActive() bool {
@@ -50,38 +50,38 @@ func initSelectionFromConfig(sel map[string]bool, cfg StreamConfig, topKeys []st
 }
 
 type tvState struct {
-    app      *tview.Application
-    header   *tview.TextView
-    footer   *tview.TextView
-    left     *tview.List
-    right    *tview.List
-    dual     *tview.Flex
-    topOnly  *tview.Flex
-    subOnly  *tview.Flex
-    pages    *tview.Pages
-    method   string
-    ident    string
-    sdActive bool
-    ngActive bool
-    syActive bool
-    cfg      StreamConfig
-    topKeys  []string
-    subMap   map[string][]string
-    selected map[string]bool
-    curTop   string
-    single   bool
+	app      *tview.Application
+	header   *tview.TextView
+	footer   *tview.TextView
+	left     *tview.List
+	right    *tview.List
+	dual     *tview.Flex
+	topOnly  *tview.Flex
+	subOnly  *tview.Flex
+	pages    *tview.Pages
+	method   string
+	ident    string
+	sdActive bool
+	ngActive bool
+	syActive bool
+	cfg      StreamConfig
+	topKeys  []string
+	subMap   map[string][]string
+	selected map[string]bool
+	curTop   string
+	single   bool
 
-    groups      []dnsGroup
-    activeGroup string
-    selfPubV4   string
+	groups      []dnsGroup
+	activeGroup string
+	selfPubV4   string
 
-    assigned map[string]Assignment // sub -> assignment parsed from config
+	assigned map[string]Assignment // sub -> assignment parsed from config
 
-    dirty bool // 有未保存更改
+	dirty bool // 有未保存更改
 
-    // initial service states at app start; used for exit restart prompt
-    initialSdActive bool
-    initialNgActive bool
+	// initial service states at app start; used for exit restart prompt
+	initialSdActive bool
+	initialNgActive bool
 }
 
 func sortedKeys(m map[string][]string) []string {
@@ -151,10 +151,10 @@ func (s *tvState) headerText() string {
 	if s.sdActive {
 		sd = "SmartDNS: [green]运行中[-]"
 	}
-    ngx := "nginx: [red]未运行[-]"
-    if s.ngActive {
-        ngx = "nginx: [green]运行中[-]"
-    }
+	ngx := "nginx: [red]未运行[-]"
+	if s.ngActive {
+		ngx = "nginx: [green]运行中[-]"
+	}
 	sy := "systemd-resolved: [green]运行中[-]"
 	if !s.syActive {
 		sy = "systemd-resolved: [gray]已停用[-]"
@@ -166,7 +166,7 @@ func (s *tvState) headerText() string {
 	if s.activeGroup != "" {
 		grp = "组: [green]" + s.activeGroup + "[-]"
 	}
-    return fmt.Sprintf(" %s  |  %s  |  %s  |  %s  |  %s  |  %s", way, dns, sd, ngx, sy, grp)
+	return fmt.Sprintf(" %s  |  %s  |  %s  |  %s  |  %s  |  %s", way, dns, sd, ngx, sy, grp)
 }
 
 func (s *tvState) setHeader() { s.header.SetDynamicColors(true).SetText(s.headerText()) }
@@ -185,59 +185,125 @@ func (s *tvState) refreshAssignments() {
 }
 
 func (s *tvState) isOccupiedByOtherGroup(sub string) bool {
-    a, ok := s.assigned[sub]
-    if !ok {
-        return false
-    }
-    // determine current target (method+ident)
-    tgt := s.targetAssignment()
-    if tgt.Ident == "" {
-        return false
-    }
-    // occupied if existing assignment does not match current target
-    if a.Method != tgt.Method {
-        return true
-    }
-    if a.Method == "nameserver" {
-        return !strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident))
-    }
-    // address: exact match
-    return strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident)
+	a, ok := s.assigned[sub]
+	if !ok {
+		return false
+	}
+	// determine current target (method+ident)
+	tgt := s.targetAssignment()
+	if tgt.Ident == "" {
+		return false
+	}
+	// occupied if existing assignment does not match current target
+	if a.Method != tgt.Method {
+		return true
+	}
+	if a.Method == "nameserver" {
+		return !strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident))
+	}
+	// address: exact match
+	return strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident)
 }
 
 func (s *tvState) resetSelectionForActiveGroup() {
-    s.selected = map[string]bool{}
-    // mark subs that belong to the current target (method + ident) as selected
-    tgt := s.targetAssignment()
-    if tgt.Ident == "" {
-        return
-    }
-    for top, subs := range s.subMap {
-        for _, sub := range subs {
-            a, ok := s.assigned[sub]
-            if !ok {
-                continue
-            }
-            if a.Method != tgt.Method {
-                continue
-            }
-            if a.Method == "nameserver" && strings.EqualFold(a.Ident, tgt.Ident) {
-                s.selected[top+"/"+sub] = true
-            }
-            if a.Method == "address" && a.Ident == tgt.Ident {
-                s.selected[top+"/"+sub] = true
-            }
-        }
-    }
+	s.selected = map[string]bool{}
+	// mark subs that belong to the current target (method + ident) as selected
+	tgt := s.targetAssignment()
+	if tgt.Ident == "" {
+		return
+	}
+	for top, subs := range s.subMap {
+		for _, sub := range subs {
+			a, ok := s.assigned[sub]
+			if !ok {
+				continue
+			}
+			if a.Method != tgt.Method {
+				continue
+			}
+			if a.Method == "nameserver" && strings.EqualFold(a.Ident, tgt.Ident) {
+				s.selected[top+"/"+sub] = true
+			}
+			if a.Method == "address" && a.Ident == tgt.Ident {
+				s.selected[top+"/"+sub] = true
+			}
+		}
+	}
+}
+
+func (s *tvState) syncTargetFromAssignments() {
+	if s.activeGroup == "" {
+		return
+	}
+	if s.assigned == nil {
+		s.assigned = map[string]Assignment{}
+	}
+	if s.activeGroup == SPECIAL_UNLOCK_GROUP_NAME {
+		s.method = "address"
+		preferred := strings.TrimSpace(s.ident)
+		if preferred == "" {
+			preferred = strings.TrimSpace(s.selfPubV4)
+		}
+		if ip := s.pickAddressIdent(preferred); ip != "" {
+			s.ident = ip
+			if ip != "" {
+				s.selfPubV4 = ip
+			}
+		} else if s.ident == "" {
+			s.ident = preferred
+		}
+		return
+	}
+	lower := strings.ToLower(strings.TrimSpace(s.activeGroup))
+	for _, a := range s.assigned {
+		if a.Method == "nameserver" && strings.ToLower(strings.TrimSpace(a.Ident)) == lower {
+			s.method = "nameserver"
+			s.ident = s.activeGroup
+			return
+		}
+	}
+	// fallback: keep address if explicitly set and still present
+	if s.method == "address" && strings.TrimSpace(s.ident) != "" {
+		ident := strings.TrimSpace(s.ident)
+		for _, a := range s.assigned {
+			if a.Method == "address" && strings.TrimSpace(a.Ident) == ident {
+				return
+			}
+		}
+	}
+	// default to nameserver using group name
+	s.method = "nameserver"
+	s.ident = s.activeGroup
+}
+
+func (s *tvState) pickAddressIdent(preferred string) string {
+	preferred = strings.TrimSpace(preferred)
+	var fallback string
+	for _, a := range s.assigned {
+		if a.Method != "address" {
+			continue
+		}
+		ident := strings.TrimSpace(a.Ident)
+		if ident == "" {
+			continue
+		}
+		if preferred != "" && strings.EqualFold(ident, preferred) {
+			return ident
+		}
+		if fallback == "" {
+			fallback = ident
+		}
+	}
+	return fallback
 }
 
 // targetAssignment resolves the effective (method, ident) pair for current editing page.
 func (s *tvState) targetAssignment() Assignment {
-    ident := s.ident
-    if s.method == "nameserver" && strings.TrimSpace(ident) == "" {
-        ident = s.activeGroup
-    }
-    return Assignment{Method: s.method, Ident: strings.TrimSpace(ident)}
+	ident := s.ident
+	if s.method == "nameserver" && strings.TrimSpace(ident) == "" {
+		ident = s.activeGroup
+	}
+	return Assignment{Method: s.method, Ident: strings.TrimSpace(ident)}
 }
 
 func (s *tvState) topMark(top string) string {
@@ -304,20 +370,20 @@ func (s *tvState) populateRight() {
 		sec := ""
 		if s.selected[key] {
 			mark = "[*]"
-        } else if s.isOccupiedByOtherGroup(sub) {
-            mark = "!"
-            if a, ok := s.assigned[sub]; ok {
-                if a.Method == "nameserver" {
-                    sec = fmt.Sprintf("被分组 %s 占用", a.Ident)
-                } else if a.Method == "address" {
-                    name := a.Ident
-                    if s.selfPubV4 != "" && a.Ident == s.selfPubV4 {
-                        name = SPECIAL_UNLOCK_GROUP_NAME
-                    }
-                    sec = fmt.Sprintf("被 %s 占用", name)
-                }
-            }
-        }
+		} else if s.isOccupiedByOtherGroup(sub) {
+			mark = "!"
+			if a, ok := s.assigned[sub]; ok {
+				if a.Method == "nameserver" {
+					sec = fmt.Sprintf("被分组 %s 占用", a.Ident)
+				} else if a.Method == "address" {
+					name := a.Ident
+					if s.selfPubV4 != "" && a.Ident == s.selfPubV4 {
+						name = SPECIAL_UNLOCK_GROUP_NAME
+					}
+					sec = fmt.Sprintf("被 %s 占用", name)
+				}
+			}
+		}
 		s.right.AddItem(fmt.Sprintf("%s %s", mark, sub), sec, 0, func() {
 			if s.isOccupiedByOtherGroup(sub) {
 				return
@@ -371,120 +437,137 @@ func (s *tvState) showEditIdent() {
 }
 
 func (s *tvState) saveSelection() {
-    count, err := s.saveSelectionSilent()
-    if err != nil {
-        s.toast(err.Error())
-        return
-    }
-    if count == 0 {
-        s.toast("没有可保存的变更")
-        return
-    }
-    if s.sdActive {
-        m := tview.NewModal().SetText(fmt.Sprintf("保存成功，变更 %d 个平台\n是否重启 SmartDNS 应用新配置？", count)).
-            AddButtons([]string{"重启", "稍后"}).SetDoneFunc(func(i int, l string) {
-                s.pages.RemovePage("modal")
-                if i == 0 {
-                    _ = runCmdInteractive("systemctl", "restart", "smartdns")
-                    s.toast("已重启 SmartDNS")
-                } else {
-                    s.toast("保存完成")
-                }
-            })
-        s.pages.AddPage("modal", center(50, 7, m), true, true)
-    } else {
-        s.toast("保存完成 (SmartDNS 未运行)")
-    }
+	count, err := s.saveSelectionSilent()
+	if err != nil {
+		s.toast(err.Error())
+		return
+	}
+	if count == 0 {
+		s.toast("没有可保存的变更")
+		return
+	}
+	if s.sdActive {
+		m := tview.NewModal().SetText(fmt.Sprintf("保存成功，变更 %d 个平台\n是否重启 SmartDNS 应用新配置？", count)).
+			AddButtons([]string{"重启", "稍后"}).SetDoneFunc(func(i int, l string) {
+			s.pages.RemovePage("modal")
+			if i == 0 {
+				_ = runCmdInteractive("systemctl", "restart", "smartdns")
+				s.toast("已重启 SmartDNS")
+			} else {
+				s.toast("保存完成")
+			}
+		})
+		s.pages.AddPage("modal", center(50, 7, m), true, true)
+	} else {
+		s.toast("保存完成 (SmartDNS 未运行)")
+	}
 }
 
 // saveSelectionSilent writes current selection without any modal prompts.
 // It validates method and ident, applies rules, refreshes state, clears dirty.
 // Returns number of platforms written, or error for invalid state.
 func (s *tvState) saveSelectionSilent() (int, error) {
-    if s.method != "nameserver" && s.method != "address" {
-        return 0, fmt.Errorf("请选择正确的添加方式 (m)")
-    }
-    if strings.TrimSpace(s.ident) == "" {
-        if s.method == "nameserver" && s.activeGroup != "" {
-            s.ident = s.activeGroup
-            s.setHeader()
-        } else {
-            return 0, fmt.Errorf("请设置组名或IP (e)")
-        }
-    }
-    // target assignment for this save
-    tgt := s.targetAssignment()
-    changed := 0
-    ngReady := fileExists(NGINX_MAIN_CONF)
-    // Ensure base SmartDNS options exist
-    _ = ensureSmartDNSBaseDirectives()
-    // Build a quick set of selected subs (by sub name)
-    selSubs := map[string]bool{}
-    for key, on := range s.selected {
-        if !on {
-            continue
-        }
-        parts := strings.SplitN(key, "/", 2)
-        if len(parts) != 2 { continue }
-        selSubs[parts[1]] = true
-    }
-    // Pass 1: remove assignments belonging to current target that are now unselected
-    for _, subs := range s.subMap {
-        for _, sub := range subs {
-            a, ok := s.assigned[sub]
-            if !ok { continue }
-            if a.Method != tgt.Method { continue }
-            if a.Method == "nameserver" {
-                if !strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident)) { continue }
-            } else { // address
-                if strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident) { continue }
-            }
-            if !selSubs[sub] {
-                _ = deletePlatformRules(sub)
-                changed++
-            }
-        }
-    }
-    // Pass 2: apply selected subs where assignment differs (or missing)
-    for key, on := range s.selected {
-        if !on { continue }
-        parts := strings.SplitN(key, "/", 2)
-        if len(parts) != 2 { continue }
-        top := parts[0]
-        sub := parts[1]
-        domains := s.cfg[top][sub]
-        if len(domains) == 0 { continue }
-        a, ok := s.assigned[sub]
-        if ok && a.Method == tgt.Method {
-            if a.Method == "nameserver" && strings.EqualFold(a.Ident, tgt.Ident) {
-                // already ours; skip rewrite
-                continue
-            }
-            if a.Method == "address" && a.Ident == tgt.Ident {
-                // already ours; skip rewrite
-                continue
-            }
-        }
-        _ = deletePlatformRules(sub)
-        _ = addDomainRules(s.method, domains, s.ident, sub)
-        changed++
-    }
-    // Ensure nginx proxy configs exist and reload nginx (if installed)
-    if ngReady {
-        if err := ensureNginxProxyConfigs(func(s string){ /* no-op in silent save */ }); err != nil {
-            logYellow("写入 Nginx 代理配置失败: " + err.Error())
-        } else {
-            _ = nginxTestAndReload(func(string){})
-        }
-    }
-    if changed > 0 {
-        s.refreshAssignments()
-        s.resetSelectionForActiveGroup()
-        s.populateRight()
-        s.dirty = false
-        s.setFooter()
-    }
-    return changed, nil
+	if s.method != "nameserver" && s.method != "address" {
+		return 0, fmt.Errorf("请选择正确的添加方式 (m)")
+	}
+	if strings.TrimSpace(s.ident) == "" {
+		if s.method == "nameserver" && s.activeGroup != "" {
+			s.ident = s.activeGroup
+			s.setHeader()
+		} else {
+			return 0, fmt.Errorf("请设置组名或IP (e)")
+		}
+	}
+	// target assignment for this save
+	tgt := s.targetAssignment()
+	changed := 0
+	ngReady := fileExists(NGINX_MAIN_CONF)
+	// Ensure base SmartDNS options exist
+	_ = ensureSmartDNSBaseDirectives()
+	// Build a quick set of selected subs (by sub name)
+	selSubs := map[string]bool{}
+	for key, on := range s.selected {
+		if !on {
+			continue
+		}
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		selSubs[parts[1]] = true
+	}
+	// Pass 1: remove assignments belonging to current target that are now unselected
+	for _, subs := range s.subMap {
+		for _, sub := range subs {
+			a, ok := s.assigned[sub]
+			if !ok {
+				continue
+			}
+			if a.Method != tgt.Method {
+				continue
+			}
+			if a.Method == "nameserver" {
+				if !strings.EqualFold(strings.TrimSpace(a.Ident), strings.TrimSpace(tgt.Ident)) {
+					continue
+				}
+			} else { // address
+				if strings.TrimSpace(a.Ident) != strings.TrimSpace(tgt.Ident) {
+					continue
+				}
+			}
+			if !selSubs[sub] {
+				_ = deletePlatformRules(sub)
+				changed++
+			}
+		}
+	}
+	// Pass 2: apply selected subs where assignment differs (or missing)
+	for key, on := range s.selected {
+		if !on {
+			continue
+		}
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		top := parts[0]
+		sub := parts[1]
+		domains := s.cfg[top][sub]
+		if len(domains) == 0 {
+			continue
+		}
+		a, ok := s.assigned[sub]
+		if ok && a.Method == tgt.Method {
+			if a.Method == "nameserver" && strings.EqualFold(a.Ident, tgt.Ident) {
+				// already ours; skip rewrite
+				continue
+			}
+			if a.Method == "address" && a.Ident == tgt.Ident {
+				// already ours; skip rewrite
+				continue
+			}
+		}
+		_ = deletePlatformRules(sub)
+		_ = addDomainRules(s.method, domains, s.ident, sub)
+		changed++
+	}
+	// Ensure nginx proxy configs exist and reload nginx (if installed)
+	if ngReady {
+		if err := ensureNginxProxyConfigs(func(s string) { /* no-op in silent save */ }); err != nil {
+			logYellow("写入 Nginx 代理配置失败: " + err.Error())
+		} else {
+			_ = nginxTestAndReload(func(string) {})
+		}
+	}
+	if changed > 0 {
+		s.refreshAssignments()
+		s.syncTargetFromAssignments()
+		s.resetSelectionForActiveGroup()
+		s.populateRight()
+		s.dirty = false
+		s.setFooter()
+	}
+	return changed, nil
 }
 
 func (s *tvState) toast(msg string) {
@@ -560,16 +643,17 @@ func (s *tvState) openLogModal(title string) *tview.TextView {
 
 // flushUI refreshes runtime states and re-renders current page safely.
 func (s *tvState) flushUI() {
-    s.app.QueueUpdateDraw(func() {
-        // refresh runtime/service states
-        s.sdActive = isSmartDNSActive()
-        s.ngActive = isNginxActive()
-        s.syActive = isSystemResolverActive()
+	s.app.QueueUpdateDraw(func() {
+		// refresh runtime/service states
+		s.sdActive = isSmartDNSActive()
+		s.ngActive = isNginxActive()
+		s.syActive = isSystemResolverActive()
 		// reload groups and assignments as files may have changed after install/uninstall
 		s.reloadGroups()
 		s.refreshAssignments()
 		// If we have an active group, reselect its current selection from config
 		if s.activeGroup != "" {
+			s.syncTargetFromAssignments()
 			s.resetSelectionForActiveGroup()
 		}
 		// Re-render depending on current page
@@ -600,31 +684,32 @@ func runTUI() {
 	}
 	topKeys, subMap := buildTopSub(cfg)
 
-    st := &tvState{
-        app:      tview.NewApplication(),
-        header:   tview.NewTextView().SetDynamicColors(true),
-        footer:   tview.NewTextView().SetDynamicColors(true),
-        left:     tview.NewList().ShowSecondaryText(false),
-        right:    tview.NewList().ShowSecondaryText(true),
-        pages:    tview.NewPages(),
-        method:   "nameserver",
-        ident:    "",
-        sdActive: isSmartDNSActive(),
-        ngActive: isNginxActive(),
-        syActive: isSystemResolverActive(),
-        cfg:      cfg,
-        topKeys:  topKeys,
-        subMap:   subMap,
-        selected: map[string]bool{},
-        curTop:   "",
-    }
-    // try detect public IPv4 early for special unlock group
-    st.selfPubV4 = getPublicIPv4()
-    // record initial service states for exit prompt
-    st.initialSdActive = st.sdActive
-    st.initialNgActive = st.ngActive
+	st := &tvState{
+		app:      tview.NewApplication(),
+		header:   tview.NewTextView().SetDynamicColors(true),
+		footer:   tview.NewTextView().SetDynamicColors(true),
+		left:     tview.NewList().ShowSecondaryText(false),
+		right:    tview.NewList().ShowSecondaryText(true),
+		pages:    tview.NewPages(),
+		method:   "nameserver",
+		ident:    "",
+		sdActive: isSmartDNSActive(),
+		ngActive: isNginxActive(),
+		syActive: isSystemResolverActive(),
+		cfg:      cfg,
+		topKeys:  topKeys,
+		subMap:   subMap,
+		selected: map[string]bool{},
+		curTop:   "",
+	}
+	// try detect public IPv4 early for special unlock group
+	st.selfPubV4 = getPublicIPv4()
+	// record initial service states for exit prompt
+	st.initialSdActive = st.sdActive
+	st.initialNgActive = st.ngActive
 	initSelectionFromConfig(st.selected, cfg, topKeys)
 	st.reloadGroups()
+	st.refreshAssignments()
 
 	st.header.SetBorder(true).SetTitle("状态")
 	st.footer.SetBorder(true).SetTitle("帮助")
@@ -905,78 +990,78 @@ func runTUI() {
 // ----- Service Manager (SmartDNS / Nginx) -----
 
 func (s *tvState) openServiceManager() {
-    options := tview.NewList().ShowSecondaryText(false)
-    options.SetBorder(true).SetTitle("服务管理")
-    options.AddItem("紧急重置 DNS -> 8.8.8.8", "停止 smartdns/systemd-resolved 并覆盖 /etc/resolv.conf", 0, func() {
-        s.pages.RemovePage("modal")
-        s.confirmEmergencyResetDNS()
-    })
-    options.AddItem("更新流媒体配置 (StreamConfig.yaml)", "从远程源拉取并刷新界面", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("更新流媒体配置")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            append("下载最新 StreamConfig.yaml ...")
-            if err := downloadStreamConfig(); err != nil {
-                append("[失败] 下载失败: " + err.Error())
-                return
-            }
-            append("解析配置 ...")
-            newCfg, err := loadStreamConfig()
-            if err != nil {
-                append("[失败] 解析失败: " + err.Error())
-                return
-            }
-            s.app.QueueUpdateDraw(func() {
-                s.cfg = newCfg
-                s.topKeys, s.subMap = buildTopSub(newCfg)
-                if s.curTop == "" || len(s.subMap[s.curTop]) == 0 {
-                    if len(s.topKeys) > 0 {
-                        s.curTop = s.topKeys[0]
-                    }
-                }
-                s.refreshAssignments()
-                s.resetSelectionForActiveGroup()
-                s.populateLeft()
-                s.populateRight()
-                s.setHeader()
-                s.setFooter()
-            })
-            append("[完成] 已更新并应用最新流媒体配置")
-        }()
-    })
-    options.AddItem("覆盖系统 DNS -> 127.0.0.1", "停用 systemd-resolved 并写入 /etc/resolv.conf", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("覆盖系统 DNS -> 127.0.0.1")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            append("停止 systemd-resolved ...")
-            _ = runCmdPipe(append, "systemctl", "stop", "systemd-resolved")
-            append("禁用 systemd-resolved 开机自启 ...")
-            _ = runCmdPipe(append, "systemctl", "disable", "systemd-resolved")
-            append("写入 /etc/resolv.conf -> 127.0.0.1 ...")
-            modifyResolv("127.0.0.1")
-            append("完成: 已将系统 DNS 覆盖为 127.0.0.1")
-            s.flushUI()
-        }()
-    })
-    options.AddItem("恢复系统 DNS（systemd-resolved）", "启用并启动 systemd-resolved", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("恢复系统 DNS")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            append("启用 systemd-resolved 开机自启 ...")
-            _ = runCmdPipe(append, "systemctl", "enable", "systemd-resolved")
-            append("启动 systemd-resolved ...")
-            _ = runCmdPipe(append, "systemctl", "start", "systemd-resolved")
-            append("完成: 已恢复系统 DNS（/etc/resolv.conf 可能由 resolved 接管）")
-            s.flushUI()
-        }()
-    })
-    options.AddItem("SmartDNS", "安装/卸载/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSmartDNSActions() })
-    options.AddItem("Nginx", "安装/启动/停止/重载/查看配置", 0, func() { s.pages.RemovePage("modal"); s.openNginxActions() })
-    options.AddItem("关闭", "", 0, func() { s.pages.RemovePage("modal") })
-    s.pages.AddPage("modal", center(50, 12, options), true, true)
+	options := tview.NewList().ShowSecondaryText(false)
+	options.SetBorder(true).SetTitle("服务管理")
+	options.AddItem("紧急重置 DNS -> 8.8.8.8", "停止 smartdns/systemd-resolved 并覆盖 /etc/resolv.conf", 0, func() {
+		s.pages.RemovePage("modal")
+		s.confirmEmergencyResetDNS()
+	})
+	options.AddItem("更新流媒体配置 (StreamConfig.yaml)", "从远程源拉取并刷新界面", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("更新流媒体配置")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("下载最新 StreamConfig.yaml ...")
+			if err := downloadStreamConfig(); err != nil {
+				append("[失败] 下载失败: " + err.Error())
+				return
+			}
+			append("解析配置 ...")
+			newCfg, err := loadStreamConfig()
+			if err != nil {
+				append("[失败] 解析失败: " + err.Error())
+				return
+			}
+			s.app.QueueUpdateDraw(func() {
+				s.cfg = newCfg
+				s.topKeys, s.subMap = buildTopSub(newCfg)
+				if s.curTop == "" || len(s.subMap[s.curTop]) == 0 {
+					if len(s.topKeys) > 0 {
+						s.curTop = s.topKeys[0]
+					}
+				}
+				s.refreshAssignments()
+				s.resetSelectionForActiveGroup()
+				s.populateLeft()
+				s.populateRight()
+				s.setHeader()
+				s.setFooter()
+			})
+			append("[完成] 已更新并应用最新流媒体配置")
+		}()
+	})
+	options.AddItem("覆盖系统 DNS -> 127.0.0.1", "停用 systemd-resolved 并写入 /etc/resolv.conf", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("覆盖系统 DNS -> 127.0.0.1")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("停止 systemd-resolved ...")
+			_ = runCmdPipe(append, "systemctl", "stop", "systemd-resolved")
+			append("禁用 systemd-resolved 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "disable", "systemd-resolved")
+			append("写入 /etc/resolv.conf -> 127.0.0.1 ...")
+			modifyResolv("127.0.0.1")
+			append("完成: 已将系统 DNS 覆盖为 127.0.0.1")
+			s.flushUI()
+		}()
+	})
+	options.AddItem("恢复系统 DNS（systemd-resolved）", "启用并启动 systemd-resolved", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("恢复系统 DNS")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			append("启用 systemd-resolved 开机自启 ...")
+			_ = runCmdPipe(append, "systemctl", "enable", "systemd-resolved")
+			append("启动 systemd-resolved ...")
+			_ = runCmdPipe(append, "systemctl", "start", "systemd-resolved")
+			append("完成: 已恢复系统 DNS（/etc/resolv.conf 可能由 resolved 接管）")
+			s.flushUI()
+		}()
+	})
+	options.AddItem("SmartDNS", "安装/卸载/启动/停止/重启", 0, func() { s.pages.RemovePage("modal"); s.openSmartDNSActions() })
+	options.AddItem("Nginx", "安装/启动/停止/重载/查看配置", 0, func() { s.pages.RemovePage("modal"); s.openNginxActions() })
+	options.AddItem("关闭", "", 0, func() { s.pages.RemovePage("modal") })
+	s.pages.AddPage("modal", center(50, 12, options), true, true)
 }
 
 func (s *tvState) confirmEmergencyResetDNS() {
@@ -1083,97 +1168,97 @@ func (s *tvState) confirmUninstallSmartDNS() {
 }
 
 func (s *tvState) openNginxActions() {
-    list := tview.NewList().ShowSecondaryText(false)
-    list.SetBorder(true).SetTitle("Nginx")
-    list.AddItem("安装 (nginx-extras)", "通过 apt 安装 nginx-extras 并启用", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("安装 Nginx")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            if err := installNginxStream(append); err != nil {
-                append("[失败] " + err.Error())
-            } else {
-                append("[完成] Nginx 安装成功")
-            }
-            s.flushUI()
-        }()
-    })
-    list.AddItem("修复并加载 stream 模块", "写入模块加载文件并校验 nginx -t", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("修复 Nginx stream 模块")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            if err := writeStreamLoaderConf(); err != nil {
-                append("写入模块加载文件失败: " + err.Error())
-            } else {
-                append("已写入 /etc/nginx/modules-enabled/50-mod-stream.conf")
-            }
-            if err := nginxTestAndReload(append); err != nil {
-                append("[失败] nginx -t 或重载失败: " + err.Error())
-            } else {
-                append("[完成] 模块加载并校验成功")
-            }
-            s.flushUI()
-        }()
-    })
-    list.AddItem("写入/刷新代理配置并重载", "为 80/443 写入反向代理并 nginx -t && reload", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("写入 Nginx 配置并重载")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            if err := ensureNginxProxyConfigs(append); err != nil {
-                append("[失败] " + err.Error())
-            } else {
-                if err := nginxTestAndReload(append); err != nil {
-                    append("[失败] nginx -t 或重载失败: " + err.Error())
-                    } else {
-                        append("[完成] Nginx 配置已生效")
-                    }
-            }
-            s.flushUI()
-        }()
-    })
-    list.AddItem("启动", "", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("启动 Nginx")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            _ = runCmdPipe(append, "systemctl", "start", "nginx")
-            s.flushUI()
-        }()
-    })
-    list.AddItem("停止", "", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("停止 Nginx")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            _ = runCmdPipe(append, "systemctl", "stop", "nginx")
-            s.flushUI()
-        }()
-    })
-    list.AddItem("重启", "", 0, func() {
-        s.pages.RemovePage("modal")
-        logView := s.openLogModal("重启 Nginx")
-        go func() {
-            append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-            _ = runCmdPipe(append, "systemctl", "restart", "nginx")
-            s.flushUI()
-        }()
-    })
-    list.AddItem("查看 nginx.conf", NGINX_MAIN_CONF, 0, func() {
-        s.pages.RemovePage("modal")
-        s.openConfigViewer("nginx.conf", NGINX_MAIN_CONF)
-    })
-    list.AddItem("查看 stream 配置", NGINX_STREAM_CONF_FILE, 0, func() {
-        s.pages.RemovePage("modal")
-        s.openConfigViewer("stream 配置", NGINX_STREAM_CONF_FILE)
-    })
-    list.AddItem("查看 http 配置", NGINX_HTTP_CONF_FILE, 0, func() {
-        s.pages.RemovePage("modal")
-        s.openConfigViewer("http 配置", NGINX_HTTP_CONF_FILE)
-    })
-    list.AddItem("返回", "", 0, func() { s.pages.RemovePage("modal"); s.openServiceManager() })
-    s.pages.AddPage("modal", center(60, 16, list), true, true)
+	list := tview.NewList().ShowSecondaryText(false)
+	list.SetBorder(true).SetTitle("Nginx")
+	list.AddItem("安装 (nginx-extras)", "通过 apt 安装 nginx-extras 并启用", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("安装 Nginx")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			if err := installNginxStream(append); err != nil {
+				append("[失败] " + err.Error())
+			} else {
+				append("[完成] Nginx 安装成功")
+			}
+			s.flushUI()
+		}()
+	})
+	list.AddItem("修复并加载 stream 模块", "写入模块加载文件并校验 nginx -t", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("修复 Nginx stream 模块")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			if err := writeStreamLoaderConf(); err != nil {
+				append("写入模块加载文件失败: " + err.Error())
+			} else {
+				append("已写入 /etc/nginx/modules-enabled/50-mod-stream.conf")
+			}
+			if err := nginxTestAndReload(append); err != nil {
+				append("[失败] nginx -t 或重载失败: " + err.Error())
+			} else {
+				append("[完成] 模块加载并校验成功")
+			}
+			s.flushUI()
+		}()
+	})
+	list.AddItem("写入/刷新代理配置并重载", "为 80/443 写入反向代理并 nginx -t && reload", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("写入 Nginx 配置并重载")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			if err := ensureNginxProxyConfigs(append); err != nil {
+				append("[失败] " + err.Error())
+			} else {
+				if err := nginxTestAndReload(append); err != nil {
+					append("[失败] nginx -t 或重载失败: " + err.Error())
+				} else {
+					append("[完成] Nginx 配置已生效")
+				}
+			}
+			s.flushUI()
+		}()
+	})
+	list.AddItem("启动", "", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("启动 Nginx")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			_ = runCmdPipe(append, "systemctl", "start", "nginx")
+			s.flushUI()
+		}()
+	})
+	list.AddItem("停止", "", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("停止 Nginx")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			_ = runCmdPipe(append, "systemctl", "stop", "nginx")
+			s.flushUI()
+		}()
+	})
+	list.AddItem("重启", "", 0, func() {
+		s.pages.RemovePage("modal")
+		logView := s.openLogModal("重启 Nginx")
+		go func() {
+			append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+			_ = runCmdPipe(append, "systemctl", "restart", "nginx")
+			s.flushUI()
+		}()
+	})
+	list.AddItem("查看 nginx.conf", NGINX_MAIN_CONF, 0, func() {
+		s.pages.RemovePage("modal")
+		s.openConfigViewer("nginx.conf", NGINX_MAIN_CONF)
+	})
+	list.AddItem("查看 stream 配置", NGINX_STREAM_CONF_FILE, 0, func() {
+		s.pages.RemovePage("modal")
+		s.openConfigViewer("stream 配置", NGINX_STREAM_CONF_FILE)
+	})
+	list.AddItem("查看 http 配置", NGINX_HTTP_CONF_FILE, 0, func() {
+		s.pages.RemovePage("modal")
+		s.openConfigViewer("http 配置", NGINX_HTTP_CONF_FILE)
+	})
+	list.AddItem("返回", "", 0, func() { s.pages.RemovePage("modal"); s.openServiceManager() })
+	s.pages.AddPage("modal", center(60, 16, list), true, true)
 }
 
 // ----- Upstream group management -----
@@ -1285,8 +1370,8 @@ func (s *tvState) showAddGroupModal(after func()) {
 		}
 		s.reloadGroups()
 		s.activeGroup = name
-		s.ident = name
-		s.method = "nameserver"
+		s.refreshAssignments()
+		s.syncTargetFromAssignments()
 		s.setHeader()
 		s.pages.RemovePage("modal-add-group")
 		if after != nil {
@@ -1422,74 +1507,72 @@ func (s *tvState) confirmDeleteDefaultDNS(idx int, ip string) {
 // ----- Group-first navigation -----
 
 func (s *tvState) openGroupsPage() {
-    s.activeGroup = ""
-    s.setHeader()
-    list := tview.NewList().ShowSecondaryText(false)
-    list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, U默认DNS, Q退出)")
-    s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  u 默认DNS  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
-    // refresh groups data
-    s.reloadGroups()
-    for _, g := range s.groups {
-        gg := g
-        label := fmt.Sprintf("%s (%s)", g.Name, g.IP)
-        list.AddItem(label, "", 0, func() {
-            s.activeGroup = gg.Name
-            s.ident = gg.Name
-            s.method = "nameserver"
-            s.refreshAssignments()
-            s.resetSelectionForActiveGroup()
-            // default to first top
-            if len(s.topKeys) > 0 {
-                s.curTop = s.topKeys[0]
-            }
-            // prepare config view and switch
-            s.populateLeft()
-            s.populateRight()
-            if s.single {
-                s.pages.SwitchToPage("single-top")
-            } else {
-                s.pages.SwitchToPage("dual")
-            }
-            s.setHeader()
-        })
-    }
-    // Append special virtual group for unlock machine
-    // Refresh public IPv4 before rendering label
-    if s.selfPubV4 == "" {
-        s.selfPubV4 = getPublicIPv4()
-    }
-    spIP := s.selfPubV4
-    if spIP == "" {
-        spIP = "(未获取公网IP，进入后可按 e 修改)"
-    }
-    spLabel := fmt.Sprintf("%s (address: %s)", SPECIAL_UNLOCK_GROUP_NAME, spIP)
-    list.AddItem(spLabel, "将所选域名解析到本机公网 IPv4", 0, func() {
-        s.activeGroup = SPECIAL_UNLOCK_GROUP_NAME
-        // refresh ip once upon enter
-        s.selfPubV4 = getPublicIPv4()
-        s.method = "address"
-        s.ident = s.selfPubV4
-        s.refreshAssignments()
-        s.resetSelectionForActiveGroup()
-        if len(s.topKeys) > 0 {
-            s.curTop = s.topKeys[0]
-        }
-        s.populateLeft()
-        s.populateRight()
-        if s.single {
-            s.pages.SwitchToPage("single-top")
-        } else {
-            s.pages.SwitchToPage("dual")
-        }
-        s.setHeader()
-        // 提示可以按 e 修改 IP
-        if s.ident == "" {
-            s.toast("未能自动获取公网 IPv4，请按 e 手动设置")
-        }
-    })
-    list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
-        if ev.Key() == tcell.KeyRune {
-            switch ev.Rune() {
+	s.activeGroup = ""
+	s.setHeader()
+	list := tview.NewList().ShowSecondaryText(false)
+	list.SetBorder(true).SetTitle("DNS 分组 (Enter进入, N新增, D删除, R刷新, U默认DNS, Q退出)")
+	s.footer.SetText("Enter 进入配置  |  n 新建分组  d 删除  r 刷新  u 默认DNS  |  z 服务管理  |  q 退出  |  进入配置后按 s 保存")
+	// refresh groups data
+	s.reloadGroups()
+	for _, g := range s.groups {
+		gg := g
+		label := fmt.Sprintf("%s (%s)", g.Name, g.IP)
+		list.AddItem(label, "", 0, func() {
+			s.activeGroup = gg.Name
+			s.refreshAssignments()
+			s.syncTargetFromAssignments()
+			s.resetSelectionForActiveGroup()
+			// default to first top
+			if len(s.topKeys) > 0 {
+				s.curTop = s.topKeys[0]
+			}
+			// prepare config view and switch
+			s.populateLeft()
+			s.populateRight()
+			if s.single {
+				s.pages.SwitchToPage("single-top")
+			} else {
+				s.pages.SwitchToPage("dual")
+			}
+			s.setHeader()
+		})
+	}
+	// Append special virtual group for unlock machine
+	// Refresh public IPv4 before rendering label
+	if s.selfPubV4 == "" {
+		s.selfPubV4 = getPublicIPv4()
+	}
+	spIP := s.selfPubV4
+	if spIP == "" {
+		spIP = "(未获取公网IP，进入后可按 e 修改)"
+	}
+	spLabel := fmt.Sprintf("%s (address: %s)", SPECIAL_UNLOCK_GROUP_NAME, spIP)
+	list.AddItem(spLabel, "将所选域名解析到本机公网 IPv4", 0, func() {
+		s.activeGroup = SPECIAL_UNLOCK_GROUP_NAME
+		// refresh ip once upon enter
+		s.selfPubV4 = getPublicIPv4()
+		s.refreshAssignments()
+		s.syncTargetFromAssignments()
+		s.resetSelectionForActiveGroup()
+		if len(s.topKeys) > 0 {
+			s.curTop = s.topKeys[0]
+		}
+		s.populateLeft()
+		s.populateRight()
+		if s.single {
+			s.pages.SwitchToPage("single-top")
+		} else {
+			s.pages.SwitchToPage("dual")
+		}
+		s.setHeader()
+		// 提示可以按 e 修改 IP
+		if s.ident == "" {
+			s.toast("未能自动获取公网 IPv4，请按 e 手动设置")
+		}
+	})
+	list.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyRune {
+			switch ev.Rune() {
 			case 'n', 'N':
 				s.showAddGroupModal(func() { s.openGroupsPage() })
 				return nil
@@ -1512,17 +1595,17 @@ func (s *tvState) openGroupsPage() {
 			case 'r', 'R':
 				s.openGroupsPage()
 				return nil
-            case 'q', 'Q':
-                s.confirmExit()
-                return nil
-            }
-        }
-        if ev.Key() == tcell.KeyEsc {
-            s.confirmExit()
-            return nil
-        }
-        return ev
-    })
+			case 'q', 'Q':
+				s.confirmExit()
+				return nil
+			}
+		}
+		if ev.Key() == tcell.KeyEsc {
+			s.confirmExit()
+			return nil
+		}
+		return ev
+	})
 	// add/replace the "groups" page
 	if s.pages.HasPage("groups") {
 		s.pages.RemovePage("groups")
@@ -1534,45 +1617,47 @@ func (s *tvState) openGroupsPage() {
 
 // confirmExit prompts to optionally restart originally running services (smartdns/nginx) before exiting.
 func (s *tvState) confirmExit() {
-    toRestart := []string{}
-    if s.initialSdActive {
-        toRestart = append(toRestart, "smartdns")
-    }
-    if s.initialNgActive {
-        toRestart = append(toRestart, "nginx")
-    }
-    if len(toRestart) == 0 {
-        s.app.Stop()
-        return
-    }
-    text := "退出前是否重启以下已运行服务以应用最新配置？\n\n"
-    for _, svc := range toRestart { text += " - " + svc + "\n" }
-    m := tview.NewModal().
-        SetText(text).
-        AddButtons([]string{"重启并退出", "直接退出", "取消"}).
-        SetDoneFunc(func(i int, l string) {
-            s.pages.RemovePage("modal-exit")
-            switch i {
-            case 0:
-                // restart selected services with log, then exit
-                logView := s.openLogModal("重启服务并退出")
-                go func() {
-                    append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
-                    for _, svc := range toRestart {
-                        append("重启 " + svc + " ...")
-                        _ = runCmdPipe(append, "systemctl", "restart", svc)
-                    }
-                    append("完成: 正在退出 ...")
-                    s.app.QueueUpdateDraw(func(){ s.pages.RemovePage("modal-log") })
-                    s.app.Stop()
-                }()
-            case 1:
-                s.app.Stop()
-            default:
-                // cancel
-            }
-        })
-    s.pages.AddPage("modal-exit", center(60, 12, m), true, true)
+	toRestart := []string{}
+	if s.initialSdActive {
+		toRestart = append(toRestart, "smartdns")
+	}
+	if s.initialNgActive {
+		toRestart = append(toRestart, "nginx")
+	}
+	if len(toRestart) == 0 {
+		s.app.Stop()
+		return
+	}
+	text := "退出前是否重启以下已运行服务以应用最新配置？\n\n"
+	for _, svc := range toRestart {
+		text += " - " + svc + "\n"
+	}
+	m := tview.NewModal().
+		SetText(text).
+		AddButtons([]string{"重启并退出", "直接退出", "取消"}).
+		SetDoneFunc(func(i int, l string) {
+			s.pages.RemovePage("modal-exit")
+			switch i {
+			case 0:
+				// restart selected services with log, then exit
+				logView := s.openLogModal("重启服务并退出")
+				go func() {
+					append := func(line string) { s.app.QueueUpdateDraw(func() { fmt.Fprintln(logView, line) }) }
+					for _, svc := range toRestart {
+						append("重启 " + svc + " ...")
+						_ = runCmdPipe(append, "systemctl", "restart", svc)
+					}
+					append("完成: 正在退出 ...")
+					s.app.QueueUpdateDraw(func() { s.pages.RemovePage("modal-log") })
+					s.app.Stop()
+				}()
+			case 1:
+				s.app.Stop()
+			default:
+				// cancel
+			}
+		})
+	s.pages.AddPage("modal-exit", center(60, 12, m), true, true)
 }
 
 func (s *tvState) confirmDeleteGroup(target dnsGroup) {
