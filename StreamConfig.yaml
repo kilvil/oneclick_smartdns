@@ -781,6 +781,11 @@ AI_Platform:
     - aistudio.google.com
     - alkalimakersuite-pa.clients6.google.com
     - generativelanguage.googleapis.com
+  Google_Ai_Misc:
+    - notebooklm.google.com
+    - notebooklm.google
+    - jules.google.com
+    - jules.google
   Copilot:
     - copilot.microsoft.com
   Cursor:
